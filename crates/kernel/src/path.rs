@@ -376,3 +376,29 @@ fn compile_journey(
         dest_station: station,
     }
 }
+
+impl crate::World {
+    /// 从本人此刻的位置走到 locale 大约要几分钟；不知道路、地点不通或没有落脚点时为 None。
+    /// 和真正出发用同一套寻路与速度，给观察里的补给线索标路程。
+    pub fn travel_minutes(&self, actor: &str, locale: &str) -> Option<f64> {
+        let a = self.actor(actor)?;
+        if matches!(a.locus.at, protocol::At::Offstage) {
+            return None;
+        }
+        let (start, lead) = if matches!(a.locus.at, protocol::At::Free { .. }) {
+            let walk = self.free_route(actor).ok()?;
+            let map = self.walk_map.as_ref()?;
+            (
+                StartPoint::Station {
+                    station: walk.station.clone(),
+                },
+                walk.length() / map.metres_per_minute,
+            )
+        } else {
+            (StartPoint::at(&self.topo, &a.locus), 0.0)
+        };
+        route(&self.topo, &start, locale, None)
+            .ok()
+            .map(|journey| journey.total_minutes() + lead)
+    }
+}

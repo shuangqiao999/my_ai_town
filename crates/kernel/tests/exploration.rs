@@ -204,3 +204,14 @@ fn strangers_standing_on_open_ground_still_see_the_ways_out() {
     )
     .unwrap();
 }
+
+/// 观察里的补给线索标路程，和真正出发用的是同一套寻路：甲地到乙地两分钟，原地零分钟，
+/// 孤岛不通就没有数。
+#[test]
+fn travel_minutes_matches_the_walk_to_a_place() {
+    let w = world();
+    assert_eq!(w.travel_minutes("lin", "loc_a"), Some(0.0));
+    let minutes = w.travel_minutes("lin", "loc_b").unwrap();
+    assert!((minutes - 2.0).abs() < 1e-9, "{minutes}");
+    assert!(w.travel_minutes("lin", "loc_c").is_none(), "孤岛不通");
+}

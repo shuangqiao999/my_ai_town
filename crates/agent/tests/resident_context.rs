@@ -5,6 +5,7 @@ use agent::{
     conversation::{estimate_tokens, wire_bytes, Message, ModelError, Role},
     runtime::{AgentRequest, ResidentRuntime},
 };
+use kernel::{needs::NeedValues, World};
 use serde_json::{json, Value};
 
 fn spacious() -> Limits {
@@ -520,4 +521,200 @@ fn a_prop_someone_else_is_using_says_so_before_anyone_tries() {
     assert!(users.starts_with("阿禾正在查看公告栏"), "{users}");
     let stand = props.iter().find(|p| p["id"] == "fixture-board").unwrap();
     assert!(stand.get("in_use").is_none(), "没人用的道具和原来一字不差");
+}
+
+fn place(w: &mut World, id: &str, locale: &str, definition: Value) {
+    let definition: kernel::props::Definition = serde_json::from_value(definition).unwrap();
+    w.place_prop(
+        serde_json::from_value(json!({
+            "instance":{"id":id,"definition":definition.reference(),"locale":locale},
+            "definition":definition
+        }))
+        .unwrap(),
+    )
+    .unwrap();
+}
+
+/// 在 loc_b 放一个饮用水桶。定义照 fixtures/props.json 的 test:water 抄，补给 200 份。
+fn place_water(w: &mut World, id: &str, locale: &str) {
+    place(
+        w,
+        id,
+        locale,
+        json!({
+            "id":"test:water","version":1,"name":"饮用水桶","description":"可饮用的清水。",
+            "actions":[{"id":"drink","label":"饮水","duration_minutes":3,"during":[],"completion":"activity",
+                "conditions":[],"on_complete":[{"kind":"restore","need":"water","amount":35}],
+                "recipient":true,"supply":{"initial":200,"cost":1}}]
+        }),
+    );
+}
+
+fn place_meal(w: &mut World, id: &str, locale: &str) {
+    place(
+        w,
+        id,
+        locale,
+        json!({
+            "id":"test:meal","version":1,"name":"饭桌",
+            "actions":[{"id":"eat","label":"吃饭","duration_minutes":30,
+                "during":[{"kind":"restore_need","need":"fullness","per_minute":1.0,"pause_decay":false}],
+                "completion":"meal","conditions":["meal_window"]}]
+        }),
+    );
+}
+
+fn place_kit(w: &mut World, id: &str, locale: &str) {
+    place(
+        w,
+        id,
+        locale,
+        json!({
+            "id":"test:kit","version":1,"name":"救助药箱",
+            "actions":[{"id":"bandage","label":"包扎伤口","duration_minutes":5,"during":[],
+                "completion":"activity","conditions":[],
+                "on_complete":[{"kind":"cure_condition","condition":"injury"}],
+                "recipient":true,"supply":{"initial":20,"cost":1}}]
+        }),
+    );
+}
+
+fn observed(q: &AgentRequest) -> Value {
+    serde_json::from_str::<Value>(&q.messages.last().unwrap().content).unwrap()["observation"]
+        .clone()
+}
+
+fn thirst() -> NeedValues<Option<f64>> {
+    NeedValues {
+        water: Some(20.0),
+        ..Default::default()
+    }
+}
+
+/// 渴到紧急档时，观察里要给出本人知道的补水地点：带地点 id、需求和动词，模型据此前往；
+/// 熟悉世界的静态地图另有一份不被 known_places 额度截掉的补给索引。
+#[test]
+fn urgent_thirst_lists_known_water_places_for_the_model() {
+    let mut w = world();
+    place_water(&mut w, "water_b", "loc_b");
+    w.adjust_body("r1", thirst()).unwrap();
+    let mut r = runtime(&mut w, spacious());
+    let q = life_request(&mut r, &mut w);
+    assert!(
+        q.messages[0].content.contains("\"supply_places\""),
+        "静态地图要有补给索引"
+    );
+    let hints = observed(&q)["survival_hints"]
+        .as_array()
+        .cloned()
+        .unwrap_or_default();
+    let water = hints
+        .iter()
+        .find(|hint| hint["place"] == "loc_b")
+        .expect("要指向乙地的水桶");
+    assert_eq!(water["need"], "水");
+    assert_eq!(water["verb"], "饮水");
+    assert_eq!(water["minutes"], 2, "甲地到乙地要走两分钟");
+}
+
+/// 身体正常时不多写生存线索，题面和加这个字段之前一样。
+#[test]
+fn a_steady_body_has_no_survival_hints() {
+    let mut w = world();
+    place_water(&mut w, "water_b", "loc_b");
+    let mut r = runtime(&mut w, spacious());
+    let q = life_request(&mut r, &mut w);
+    assert!(observed(&q).get("survival_hints").is_none());
+}
+
+/// 陌生环境不白送全图补给：只列到过的地方，没去过的乙地不能提前出现。
+#[test]
+fn strangers_only_see_supplies_in_places_they_know() {
+    let mut w = world();
+    place_water(&mut w, "water_b", "loc_b");
+    w.set_strangers(true);
+    w.adjust_body("r1", thirst()).unwrap();
+    let mut r = runtime(&mut w, spacious());
+    let q = life_request(&mut r, &mut w);
+    assert!(
+        !q.messages[0].content.contains("\"supply_places\""),
+        "陌生环境不直接给全图补给索引"
+    );
+    let hints = observed(&q)["survival_hints"]
+        .as_array()
+        .cloned()
+        .unwrap_or_default();
+    assert!(hints.is_empty(), "没去过的乙地不该出现：{hints:?}");
+}
+
+/// 又渴又饿时先找水；带供餐时段的食物在非饭点要标出来，别让模型以为随时有饭。
+#[test]
+fn urgent_thirst_comes_before_food_and_closed_meals_say_so() {
+    let mut w = world();
+    place_water(&mut w, "water_b", "loc_b");
+    place_meal(&mut w, "meal_b", "loc_b");
+    w.topo.meals = vec![kernel::topology::MealWindow {
+        name: "午饭".into(),
+        start: 690.0,
+        end: 810.0,
+        menu: "米饭".into(),
+    }];
+    w.adjust_body(
+        "r1",
+        NeedValues {
+            water: Some(20.0),
+            fullness: Some(20.0),
+            ..Default::default()
+        },
+    )
+    .unwrap();
+    let mut r = runtime(&mut w, spacious());
+    let q = life_request(&mut r, &mut w);
+    let hints = observed(&q)["survival_hints"]
+        .as_array()
+        .cloned()
+        .unwrap_or_default();
+    assert_eq!(hints[0]["need"], "水", "缺水更急，排在最前：{hints:?}");
+    let food = hints
+        .iter()
+        .find(|hint| hint["need"] == "食物")
+        .expect("也要给出食物线索");
+    assert_eq!(food["open"], false, "早上七点不在午饭时段");
+    assert!(food["serving"].as_str().unwrap().contains("午饭"));
+}
+
+/// 受伤时给出能治伤的地点，带路程和剩余补给。
+#[test]
+fn injury_lists_known_treatment_places() {
+    let mut w = world();
+    place_kit(&mut w, "kit_b", "loc_b");
+    w.apply_condition("r1", protocol::BodyConditionKind::Injury, 1.0, "摔伤")
+        .unwrap();
+    let mut r = runtime(&mut w, spacious());
+    let q = life_request(&mut r, &mut w);
+    let hints = observed(&q)["treatment_hints"]
+        .as_array()
+        .cloned()
+        .unwrap_or_default();
+    let treatment = hints
+        .iter()
+        .find(|hint| hint["place"] == "loc_b")
+        .expect("要指向乙地的药箱");
+    assert_eq!(treatment["condition"], "受伤");
+    assert_eq!(treatment["verb"], "包扎伤口");
+    assert_eq!(treatment["minutes"], 2);
+    assert_eq!(treatment["remaining"], 20);
+}
+
+/// 求生决策的自述在日记里单独标成「生理紧急」。
+#[test]
+fn survival_thoughts_are_tagged_in_the_diary() {
+    let mut w = world();
+    place_water(&mut w, "water_b", "loc_b");
+    w.adjust_body("r1", thirst()).unwrap();
+    let mut r = runtime(&mut w, spacious());
+    let q = life_request(&mut r, &mut w);
+    reply(&mut r, &mut w, &q, "observe", json!({}));
+    let thought = w.actor("r1").unwrap().journal.thought.as_ref().unwrap();
+    assert_eq!(thought.trigger_info.text, "生理紧急");
 }

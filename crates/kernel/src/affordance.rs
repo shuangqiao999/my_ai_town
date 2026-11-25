@@ -11,6 +11,7 @@
 
 use crate::props::{Action, Effect, InstantEffect, Need};
 use crate::topology::{Prop, PropVerb, Topology};
+use protocol::BodyConditionKind;
 use std::collections::{BTreeMap, BTreeSet};
 
 /// 恢复类换算：老项目 1 个等级步进 = 25 标量点（0–100 刻度）。
@@ -118,6 +119,57 @@ impl Spot {
                     )
                 })
             })
+    }
+
+    /// 补水动作：过程中或完成时恢复水分。给观察里的生存线索分类用。
+    pub fn restores_water(&self) -> bool {
+        self.water_rate > 0.0
+            || self.action.as_ref().is_some_and(|a| {
+                a.on_complete.iter().any(|e| {
+                    matches!(
+                        e,
+                        InstantEffect::Restore {
+                            need: Need::Water,
+                            ..
+                        }
+                    )
+                })
+            })
+    }
+
+    /// 治疗动作：完成时解除某种身体状况。求药线索按本人实际患有的状况找地方。
+    pub fn cures(&self, condition: BodyConditionKind) -> bool {
+        self.action
+            .as_ref()
+            .is_some_and(|a| a.on_complete.iter().any(|e| cures(e, condition)))
+    }
+
+    /// 恢复健康的动作（急救、治疗健康）。注意这不等于解除中毒或疾病。
+    pub fn restores_health(&self) -> bool {
+        self.health_rate > 0.0
+            || self
+                .action
+                .as_ref()
+                .is_some_and(|a| a.on_complete.iter().any(restores_health))
+    }
+}
+
+fn cures(effect: &InstantEffect, condition: BodyConditionKind) -> bool {
+    match effect {
+        InstantEffect::CureCondition { condition: kind } => *kind == condition,
+        InstantEffect::Chance { effects, .. } => effects.iter().any(|e| cures(e, condition)),
+        _ => false,
+    }
+}
+
+fn restores_health(effect: &InstantEffect) -> bool {
+    match effect {
+        InstantEffect::Restore {
+            need: Need::Health,
+            amount,
+        } => *amount > 0.0,
+        InstantEffect::Chance { effects, .. } => effects.iter().any(restores_health),
+        _ => false,
     }
 }
 

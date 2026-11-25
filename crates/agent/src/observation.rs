@@ -1,8 +1,9 @@
 //! 只投影本人状态、眼前对象与已知地图。观察仪的世界全貌不进入村民上下文。
 use crate::{interaction, prompts, resident, AgentError};
-use kernel::{intent::BuiltinVerb, topology::Prop, world::ActKind, World};
-use protocol::FactKind;
+use kernel::{intent::BuiltinVerb, props::Condition, topology::Prop, world::ActKind, World};
+use protocol::{BodyConditionKind, FactKind, Need, NeedBand};
 use serde_json::{json, Value};
+use std::cmp::Ordering;
 
 /// 建镇生成器给户外活动区域生成的落脚点编号前缀（scripts/mapgen/spatial.mjs 的 spots）。
 const SPOT_PREFIX: &str = "spot_";
@@ -11,6 +12,320 @@ const SPOT_PREFIX: &str = "spot_";
 const EVENTS_PER_OBSERVATION: usize = 24;
 /// 事件正文进入观察时的截断长度。
 pub const EVENT_TEXT_CHARS: usize = 400;
+
+/// 补给地点最多列几条，避免把题面撑大。
+const SUPPLY_HINTS_MAX: usize = 6;
+
+/// 一类生存资源：水、食物或治疗。
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum SupplyKind {
+    Water,
+    Food,
+    Health,
+}
+
+impl SupplyKind {
+    fn label(self) -> &'static str {
+        match self {
+            Self::Water => "水",
+            Self::Food => "食物",
+            Self::Health => "治疗",
+        }
+    }
+}
+
+/// 本人知道的一处补给地点。只描述现有可供性，不替谁做决定。
+struct Supply {
+    kind: SupplyKind,
+    /// 治疗的状况；只恢复健康（不对应具体状况）时为空。
+    condition: Option<BodyConditionKind>,
+    locale: String,
+    name: String,
+    verb: String,
+    remaining: Option<u32>,
+    /// 供餐时段说明；只在不限时以外的食物动作上有。
+    serving: Option<String>,
+    here: bool,
+    home: bool,
+}
+
+/// 一天内的分钟数写成 HH:MM。
+fn clock_hm(minutes: f64) -> String {
+    let t = kernel::time_of_day(minutes);
+    format!("{:02}:{:02}", (t / 60.0) as u32, (t % 60.0) as u32)
+}
+
+/// 三餐时段说明；空餐表（测试拓扑或不限时）为空。
+fn serving_text(world: &World) -> Option<String> {
+    (!world.topo.meals.is_empty()).then(|| {
+        world
+            .topo
+            .meals
+            .iter()
+            .map(|meal| {
+                format!(
+                    "{} {}–{}",
+                    meal.name,
+                    clock_hm(meal.start),
+                    clock_hm(meal.end)
+                )
+            })
+            .collect::<Vec<_>>()
+            .join("、")
+    })
+}
+
+/// 食物动作带 meal_window 条件时，给出供餐时段说明。
+fn food_serving(world: &World, spot: &kernel::affordance::Spot) -> Option<String> {
+    spot.action
+        .as_ref()
+        .filter(|action| action.conditions.contains(&Condition::MealWindow))
+        .and_then(|_| serving_text(world))
+}
+
+/// 此刻这个食物动作能不能开始；不限时的动作永远能开始。
+fn serving_open(world: &World, serving: Option<&str>) -> bool {
+    serving.is_none()
+        || world.topo.meals.is_empty()
+        || kernel::calendar::meal_at(&world.topo.meals, world.minutes()).is_some()
+}
+
+/// 先当前地点，再自己的家，再公共地点，按名字排。
+fn supply_order(x: &Supply, y: &Supply) -> Ordering {
+    y.here
+        .cmp(&x.here)
+        .then(y.home.cmp(&x.home))
+        .then(x.name.cmp(&y.name))
+        .then(x.kind.label().cmp(y.kind.label()))
+}
+
+/// 本人知道、还有剩量的补给地点。熟悉世界看全部地点；陌生世界只看记得的地方（含家和当前地点）。
+/// 跳过别人住宅和看不见的东西；这里只查现有可供性，不新增动作，也不保证去了一定有。
+fn known_supplies(world: &World, actor: &str, a: &kernel::world::Actor) -> Vec<Supply> {
+    let here = a.locus.locale.as_str();
+    let locales: Vec<String> = match world.known_places(actor) {
+        Some(places) => places.into_iter().map(|p| p.id).collect(),
+        None => world.topo.places.iter().map(|p| p.locale.clone()).collect(),
+    };
+    let mut supplies = Vec::new();
+    for locale in locales {
+        let Some(place) = world.topo.place_of(&locale) else {
+            continue;
+        };
+        let home = a.home.as_deref() == Some(locale.as_str());
+        if place.residential && !home {
+            continue;
+        }
+        for spot in world.affordances.options(&locale) {
+            if !world.sees_prop(actor, &spot.prop) {
+                continue;
+            }
+            let remaining = spot
+                .action
+                .as_ref()
+                .and_then(|action| world.props().supply_remaining(&spot.prop, action));
+            if remaining == Some(0) {
+                continue;
+            }
+            let mut push = |kind: SupplyKind, condition: Option<BodyConditionKind>| {
+                supplies.push(Supply {
+                    kind,
+                    condition,
+                    locale: locale.clone(),
+                    name: place.name.clone(),
+                    verb: spot.verb.clone(),
+                    remaining,
+                    serving: (kind == SupplyKind::Food)
+                        .then(|| food_serving(world, spot))
+                        .flatten(),
+                    here: locale == here,
+                    home,
+                });
+            };
+            if spot.restores_water() {
+                push(SupplyKind::Water, None);
+            }
+            if spot.restores_fullness() {
+                push(SupplyKind::Food, None);
+            }
+            if spot.restores_health() {
+                push(SupplyKind::Health, None);
+            }
+            for condition in [
+                BodyConditionKind::Injury,
+                BodyConditionKind::Illness,
+                BodyConditionKind::Poison,
+            ] {
+                if spot.cures(condition) {
+                    push(SupplyKind::Health, Some(condition));
+                }
+            }
+        }
+    }
+    supplies.sort_by(supply_order);
+    supplies
+}
+
+/// 静态地图里的补给索引：不带剩余量、路程和此刻是否供餐（system 前缀保持稳定），
+/// 只给地点、需求和动词；食物另带时段说明。
+fn supply_index(world: &World, actor: &str, a: &kernel::world::Actor) -> Vec<Value> {
+    let mut seen = std::collections::BTreeSet::new();
+    let mut out = Vec::new();
+    for s in known_supplies(world, actor, a) {
+        if !seen.insert((s.locale.clone(), s.kind.label())) {
+            continue;
+        }
+        let mut view = json!({
+            "need": s.kind.label(),
+            "place": s.locale,
+            "name": s.name,
+            "verb": s.verb
+        });
+        if let Some(serving) = &s.serving {
+            view["serving"] = json!(serving);
+        }
+        out.push(view);
+        if out.len() >= SUPPLY_HINTS_MAX {
+            break;
+        }
+    }
+    out
+}
+
+/// 饥渴进入紧急或崩溃档时，把本人知道的补水/进食地点随观察发出去：需要什么、去哪、要几分钟、
+/// 到了做什么。水排在食物前面；供餐中的食物优先。只补信息，去不去、怎么去仍由模型决定；
+/// 不知道时给空列表，模型得自己探索。
+fn survival_hints(world: &World, actor: &str, a: &kernel::world::Actor) -> Option<Value> {
+    let urgent: Vec<Need> = a
+        .needs
+        .states()
+        .into_iter()
+        .filter(|state| {
+            matches!(state.kind, Need::Water | Need::Fullness)
+                && matches!(state.band, NeedBand::Urgent | NeedBand::Collapse)
+        })
+        .map(|state| state.kind)
+        .collect();
+    if urgent.is_empty() {
+        return None;
+    }
+    let mut supplies: Vec<Supply> = known_supplies(world, actor, a)
+        .into_iter()
+        .filter(|s| match s.kind {
+            SupplyKind::Water => urgent.contains(&Need::Water),
+            SupplyKind::Food => urgent.contains(&Need::Fullness),
+            SupplyKind::Health => false,
+        })
+        .collect();
+    supplies.sort_by(|x, y| {
+        let rank = |kind| match kind {
+            SupplyKind::Water => 0,
+            SupplyKind::Food => 1,
+            SupplyKind::Health => 2,
+        };
+        rank(x.kind)
+            .cmp(&rank(y.kind))
+            .then_with(|| {
+                if x.kind == SupplyKind::Food {
+                    serving_open(world, y.serving.as_deref())
+                        .cmp(&serving_open(world, x.serving.as_deref()))
+                } else {
+                    Ordering::Equal
+                }
+            })
+            .then_with(|| supply_order(x, y))
+    });
+    let mut seen = std::collections::BTreeSet::new();
+    let mut hints = Vec::new();
+    for s in supplies {
+        if !seen.insert((s.locale.clone(), s.kind.label())) {
+            continue;
+        }
+        let mut hint = json!({
+            "need": s.kind.label(),
+            "place": s.locale,
+            "name": s.name,
+            "verb": s.verb
+        });
+        if let Some(minutes) = world.travel_minutes(actor, &s.locale) {
+            hint["minutes"] = json!(minutes.round().max(0.0) as u32);
+        }
+        if let Some(remaining) = s.remaining {
+            hint["remaining"] = json!(remaining);
+        }
+        if s.kind == SupplyKind::Food {
+            if let Some(serving) = &s.serving {
+                hint["open"] = json!(serving_open(world, Some(serving)));
+                hint["serving"] = json!(serving);
+            }
+        }
+        if s.here {
+            hint["here"] = json!(true);
+        }
+        hints.push(hint);
+        if hints.len() >= SUPPLY_HINTS_MAX {
+            break;
+        }
+    }
+    Some(json!(hints))
+}
+
+/// 有伤病或健康危险时，列出本人知道的、能治对应状况或恢复健康的地点。
+fn treatment_hints(world: &World, actor: &str, a: &kernel::world::Actor) -> Option<Value> {
+    let conditions: Vec<BodyConditionKind> = a
+        .needs
+        .active_conditions()
+        .iter()
+        .map(|condition| condition.kind)
+        .collect();
+    let health_low = a.needs.states().into_iter().any(|state| {
+        state.kind == Need::Health && matches!(state.band, NeedBand::Urgent | NeedBand::Collapse)
+    });
+    if conditions.is_empty() && !health_low {
+        return None;
+    }
+    let supplies: Vec<Supply> = known_supplies(world, actor, a)
+        .into_iter()
+        .filter(|s| s.kind == SupplyKind::Health)
+        .filter(|s| match s.condition {
+            Some(condition) => conditions.contains(&condition),
+            None => health_low,
+        })
+        .collect();
+    let mut seen = std::collections::BTreeSet::new();
+    let mut hints = Vec::new();
+    for s in supplies {
+        if !seen.insert((
+            s.locale.clone(),
+            s.condition.map(BodyConditionKind::label).unwrap_or("健康"),
+        )) {
+            continue;
+        }
+        let mut hint = json!({
+            "place": s.locale,
+            "name": s.name,
+            "verb": s.verb
+        });
+        match s.condition {
+            Some(condition) => hint["condition"] = json!(condition.label()),
+            None => hint["need"] = json!("健康"),
+        }
+        if let Some(minutes) = world.travel_minutes(actor, &s.locale) {
+            hint["minutes"] = json!(minutes.round().max(0.0) as u32);
+        }
+        if let Some(remaining) = s.remaining {
+            hint["remaining"] = json!(remaining);
+        }
+        if s.here {
+            hint["here"] = json!(true);
+        }
+        hints.push(hint);
+        if hints.len() >= SUPPLY_HINTS_MAX {
+            break;
+        }
+    }
+    Some(json!(hints))
+}
 
 /// 不随位置变化的部分：家、已知地图与基础动作。放在 system 消息里，请求前缀保持稳定。
 /// 陌生环境里已知地图随探索变化，挪进观察（known_places、exits），这里不列。
@@ -46,11 +361,17 @@ pub fn static_map(world: &World, actor: &str) -> Result<Value, AgentError> {
             json!({"id":p.locale,"name":p.name,"verbs":verbs})
         })
         .collect();
-    Ok(json!({
+    let mut map = json!({
         "home": a.home,
         "known_places": places,
         "basic_actions": basic_actions
-    }))
+    });
+    // 补给索引单独给，避免被 known_places 的字节额度截掉；没有补给点时不写这一栏。
+    let supplies = supply_index(world, actor, a);
+    if !supplies.is_empty() {
+        map["supply_places"] = json!(supplies);
+    }
+    Ok(map)
 }
 
 /// 给村民看的一组物品：同样的东西一堆只列一个编号（堆里编号最小的那件）和件数，要几件时把编号写几遍，
@@ -383,6 +704,14 @@ pub fn observe(world: &World, actor: &str, after: u64) -> Result<(Value, u64), A
     }
     if let Some(exits) = world.exits(actor) {
         value["exits"] = json!(exits);
+    }
+    // 饥渴进入紧急档：把知道的补水/进食地点随观察发出去。只补信息，走不走由本人决定。
+    if let Some(hints) = survival_hints(world, actor, a) {
+        value["survival_hints"] = hints;
+    }
+    // 受伤、疾病、中毒或健康危险：列出能治的地方。
+    if let Some(hints) = treatment_hints(world, actor, a) {
+        value["treatment_hints"] = hints;
     }
     Ok((value, cursor))
 }
