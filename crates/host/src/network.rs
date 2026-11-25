@@ -248,12 +248,19 @@ fn serve_connection(
             },
             Ok(Message::Close(_)) => return,
             Ok(_) => {}
-            Err(tungstenite::Error::Io(e))
-                if e.kind() == std::io::ErrorKind::WouldBlock
-                    || e.kind() == std::io::ErrorKind::TimedOut => {}
+            Err(tungstenite::Error::Io(e)) if read_timeout(&e) => {}
             Err(_) => return,
         }
     }
+}
+
+/// 读等待到期：Windows 在短读超时时可能返回 ERROR_IO_PENDING（997），和 WouldBlock/TimedOut
+/// 一样只是“这次没读到”，不能当成连接坏了。
+fn read_timeout(error: &std::io::Error) -> bool {
+    matches!(
+        error.kind(),
+        std::io::ErrorKind::WouldBlock | std::io::ErrorKind::TimedOut
+    ) || error.raw_os_error() == Some(997)
 }
 
 /// 发出一条消息；返回 false 时连接不能再用。写超时记日志，对方正常断开不记。
