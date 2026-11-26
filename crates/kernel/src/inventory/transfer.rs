@@ -4,7 +4,7 @@ use crate::error::{KernelError, Result};
 use crate::{
     action_check::check_conditions,
     intent::{Intent, StopCond},
-    props::{check_room, Action, Definition, Instance, Placement, MAX_STACK},
+    props::{check_room, Action, Completion, Definition, Instance, Placement, MAX_STACK},
 };
 use protocol::{At, InventoryAction as Op};
 use sha2::{Digest, Sha256};
@@ -56,6 +56,8 @@ fn portions(
     use_action.consumes_item = true;
     use_action.conditions.clear();
     use_action.during.clear();
+    // 领走的一份是普通进食/饮用/治疗，不再受原动作的供餐窗口等条件限制。
+    use_action.completion = Completion::Activity;
     let def = Definition {
         id: format!("portion:{hash}"),
         version: 1,

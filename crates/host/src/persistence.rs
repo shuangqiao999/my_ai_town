@@ -324,7 +324,7 @@ impl SaveStore {
         let migrated = migration::migrate(value)?;
         let mut saved = migrated.file;
         let legacy = migrated.from_version < 3; // v3 起身份已由人口登记单独管理；v4 不改变地图标识。
-        self.check_identity(
+        let content_upgrade = self.check_identity(
             &saved,
             legacy,
             migrated.backups.contains(&Backup::Physiology),
@@ -395,6 +395,14 @@ impl SaveStore {
         for backup in &migrated.backups {
             self.write_backup(backup, &bytes, &saved.resident_files, &saved.history)?;
         }
+        if content_upgrade {
+            self.write_backup(
+                &Backup::Content,
+                &bytes,
+                &saved.resident_files,
+                &saved.history,
+            )?;
+        }
         if migrated.from_version >= 2 {
             lock(&self.disk).tidy(&saved.resident_files, &saved.history)?;
         }
@@ -425,7 +433,7 @@ impl SaveStore {
         saved: &SaveFile,
         legacy: bool,
         body_migrated: bool,
-    ) -> Result<(), HostError> {
+    ) -> Result<bool, HostError> {
         let identities = saved.world.identities();
         let expected = match (&self.definition, legacy) {
             (Some(definition), true) => {
@@ -437,21 +445,27 @@ impl SaveStore {
             }
             _ => self.world_key.clone(),
         };
-        let known_upgrade = body_migrated
-            && migration::known_upgrade(
+        // 标识一致且没有旧身体字段时不需要兼容表；测试里的 SaveStore::open 没给表也能正常读。
+        let needs_table =
+            body_migrated || (saved.world_key != expected && self.compatibility.is_some());
+        let known_upgrade = if needs_table {
+            migration::known_upgrade(
                 &self.compatibility_table()?,
                 &saved.world_key,
                 &self.world_key,
                 legacy,
                 &identities,
-            )?;
+            )?
+        } else {
+            false
+        };
         if saved.world_key != expected && !known_upgrade {
             return Err(HostError::Save(format!(
                 "存档 {} 的版本、地图、规则或村民身份不匹配，原文件已保留；请使用匹配配置或 --save-file 指定新文件",
                 self.path.display()
             )));
         }
-        Ok(())
+        Ok(known_upgrade && !body_migrated)
     }
 
     /// 迁移前把原始存档及其引用的记忆对象、流水完整留存。

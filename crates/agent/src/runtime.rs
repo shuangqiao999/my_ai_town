@@ -593,6 +593,7 @@ impl ResidentRuntime {
             mark_shown(s, &body);
             s.cursors.delivered = s.cursors.delivered.max(draft.seen);
             s.messages.push(user);
+            s.streaks.nudge = None;
         }
         let request = AgentRequest {
             actor_id: s.actor_id.clone(),

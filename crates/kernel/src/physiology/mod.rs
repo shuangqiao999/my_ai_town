@@ -20,7 +20,7 @@ pub const HEAL_RATE: f64 = 0.08;
 /// 有持续损害机制的三项需求；顺序就是 exposure 数组的下标。
 pub const EXPOSURE_NEEDS: [Need; 3] = [Need::Fullness, Need::Water, Need::Energy];
 /// 劳作时水分的额外消耗（每分钟）。
-const LABOR_WATER_COST: f64 = 0.04;
+const LABOR_WATER_COST: f64 = 0.03;
 /// 走路的额外消耗占劳作的几成。走路不像劳作那样累到一定程度就不让做：累了也得能走回去歇着。
 const WALK_SHARE: f64 = 0.5;
 /// 淋湿进度的上限：到这里着凉生病，进度清零。

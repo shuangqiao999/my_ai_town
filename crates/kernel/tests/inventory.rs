@@ -190,3 +190,84 @@ fn supply_take_and_direct_use_share_stock_and_portable_effects_work_elsewhere() 
     assert_eq!(w.inventory_view("a").slots[0].quantity, 2);
     assert_eq!(snapshot(&restored(&w)), snapshot(&w));
 }
+
+/// 供餐时段能打包一份饭，带走后不在饭点也能吃。
+#[test]
+fn a_meal_portion_can_be_taken_during_the_window_and_eaten_later() {
+    let mut w = world();
+    w.topo.meals = vec![kernel::topology::MealWindow {
+        name: "午饭".into(),
+        start: 360.0,
+        end: 480.0,
+        menu: "米饭".into(),
+    }];
+    put(
+        &mut w,
+        "meal",
+        json!({"id":"player:meal","name":"餐桌","actions":[{"id":"eat","label":"吃饭","duration_minutes":30,"completion":"meal","conditions":["meal_window"],"on_complete":[{"kind":"restore","need":"fullness","amount":50}],"supply":{"initial":10,"cost":1},"recipient":true,"portion_name":"一份饭"}]}),
+    );
+    transfer(
+        &mut w,
+        "a",
+        "take-meal",
+        Op::Take {
+            source: "meal".into(),
+            action: "eat".into(),
+            quantity: 1,
+        },
+    )
+    .unwrap();
+    finish(&mut w, "a", "take-meal");
+    assert_eq!(snapshot(&w)["supplies"]["meal/eat"], 9);
+    let item = w.inventory_view("a").slots[0].items[0].clone();
+
+    w.topo.meals.clear();
+    w.set_body_values("a", Some(30.0), None, None, None)
+        .unwrap();
+    submit(
+        &mut w,
+        "a",
+        "eat-portion",
+        json!({"intent":{"verb":"吃饭"},"prop_id":item}),
+    )
+    .unwrap();
+    finish(&mut w, "a", "eat-portion");
+    assert!(w.actor("a").unwrap().needs.fullness.value > 50.0);
+    assert!(!w.inventory().carried_by(&item, "a"));
+}
+
+/// 药箱也能领取一份，带走后治好伤。
+#[test]
+fn a_medical_portion_can_be_taken_and_used_later() {
+    let mut w = world();
+    put(
+        &mut w,
+        "kit",
+        json!({"id":"player:kit","name":"救助药箱","actions":[{"id":"bandage","label":"包扎伤口","duration_minutes":5,"completion":"activity","conditions":[],"on_complete":[{"kind":"cure_condition","condition":"injury"}],"recipient":true,"supply":{"initial":5,"cost":1},"portion_name":"一卷绷带"}]}),
+    );
+    w.apply_condition("a", protocol::BodyConditionKind::Injury, 1.0, "摔伤")
+        .unwrap();
+    transfer(
+        &mut w,
+        "a",
+        "take-kit",
+        Op::Take {
+            source: "kit".into(),
+            action: "bandage".into(),
+            quantity: 1,
+        },
+    )
+    .unwrap();
+    finish(&mut w, "a", "take-kit");
+    let item = w.inventory_view("a").slots[0].items[0].clone();
+    submit(
+        &mut w,
+        "a",
+        "bandage",
+        json!({"intent":{"verb":"包扎伤口"},"prop_id":item}),
+    )
+    .unwrap();
+    finish(&mut w, "a", "bandage");
+    assert!(w.actor("a").unwrap().needs.active_conditions().is_empty());
+    assert!(!w.inventory().carried_by(&item, "a"));
+}

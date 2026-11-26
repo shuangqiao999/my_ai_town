@@ -69,6 +69,9 @@ pub const RESTORED_AFTER_RESTART: &str = "进程已恢复，旧模型请求不�
 pub const REFLECTION_TOOLS_ONLY: &str = "整理轮次只允许 reflect 和回看已读内容，不能执行世界动作";
 /// 请求途中收到重要通知，改变世界的调用退回。
 pub const STALE_AFTER_NOTICE: &str = "请求期间收到重要通知，请先重新观察再执行";
+/// 上一轮生活决策只有想法、没有任何工具调用：提醒这一轮必须行动或明确等待。
+pub const NO_ACTION_REMINDER: &str =
+    "上一轮只有想法，没有提交任何动作。这一轮请直接提交前往、道具、停留或 wait_for；如果还想去某处，现在就出发，不要再只写打算。";
 
 /// 静态地图里的基础动作说明；「前往」的参数写法只在这里说明。
 pub const GO_PARAMETERS: &str =

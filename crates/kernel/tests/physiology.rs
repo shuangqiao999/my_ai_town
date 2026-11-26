@@ -244,7 +244,7 @@ fn walking_costs_half_of_labor_on_energy_and_water() {
         b.energy.value - a.energy.value,
         a.tuning.labor_rate * 0.5 * walked,
     );
-    close(b.water.value - a.water.value, 0.02 * walked);
+    close(b.water.value - a.water.value, 0.015 * walked);
     assert!(!w
         .body_view("a")
         .unwrap()

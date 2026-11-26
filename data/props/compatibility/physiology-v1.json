@@ -6,6 +6,16 @@
     "legacy_prefix_hash": "6e569f5b8a9bddb5"
   },
   {
+    "map": "2d-town",
+    "previous": "physiology-v1:8342fc28edd0c28b",
+    "current": "physiology-v1:69bad49bfc03efd2"
+  },
+  {
+    "map": "spring-valley",
+    "previous": "physiology-v1:71e2b2366fb291b7",
+    "current": "physiology-v1:c2d39e6cab2269dd"
+  },
+  {
     "map": "reference-island",
     "previous": "7dd1a23ecc482f29",
     "current": "physiology-v1:9517978246f48731",

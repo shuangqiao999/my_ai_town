@@ -44,9 +44,12 @@ fn visible_props(state: &mut InputState, view: &mut Value, bytes: usize) {
     let mut size = 2;
     for prop in full {
         let verbs: Vec<_> = prop["verbs"].as_array().into_iter().flatten().map(|v| {
-            json!({"verb":v["verb"],"action_id":v["action_id"],"minutes":v["minutes"],"remaining":v["remaining"],"effects":v["description"]["effects"]})
+            json!({"verb":v["verb"],"action_id":v["action_id"],"minutes":v["minutes"],"remaining":v["remaining"],"effects":v["description"]["effects"],"available":v["available"],"serving":v["serving"]})
         }).collect();
         let mut item = json!({"id":prop["id"],"name":prop["name"],"verbs":verbs});
+        if let Some(portions) = prop.get("portions") {
+            item["portions"] = portions.clone();
+        }
         if let Some(users) = prop.get("in_use") {
             item["in_use"] = users.clone();
         }

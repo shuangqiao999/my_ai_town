@@ -602,6 +602,41 @@
         "during": [],
         "completion": "activity",
         "conditions": []
+      },
+      {
+        "id": "pick_wood",
+        "label": "捡木料",
+        "duration_minutes": 10,
+        "during": [
+          {
+            "kind": "labor"
+          }
+        ],
+        "completion": "activity",
+        "conditions": [],
+        "supply": {
+          "initial": 2,
+          "cost": 1,
+          "restock": {
+            "amount": 1,
+            "max": 3
+          }
+        },
+        "on_complete": [
+          {
+            "kind": "give_item",
+            "count": 1,
+            "item": {
+              "id": "core:firewood",
+              "version": 1,
+              "name": "一捆枯枝",
+              "description": "干枯的枝条，可以生火或搭东西。",
+              "portable": true,
+              "stack_limit": 5,
+              "actions": []
+            }
+          }
+        ]
       }
     ]
   },
@@ -1122,6 +1157,125 @@
         "during": [],
         "completion": "activity",
         "conditions": []
+      },
+      {
+        "id": "pick_flower",
+        "label": "采花",
+        "duration_minutes": 10,
+        "during": [
+          {
+            "kind": "labor"
+          }
+        ],
+        "completion": "activity",
+        "conditions": [],
+        "supply": {
+          "initial": 2,
+          "cost": 1,
+          "restock": {
+            "amount": 1,
+            "max": 2
+          }
+        },
+        "on_complete": [
+          {
+            "kind": "give_item",
+            "count": 1,
+            "item": {
+              "id": "core:portable-flower",
+              "version": 1,
+              "name": "一朵野花",
+              "description": "可拾取、赠予和摆放的花。",
+              "portable": true,
+              "stack_limit": 5,
+              "actions": []
+            }
+          }
+        ]
+      },
+      {
+        "id": "pick_herb",
+        "label": "采草药",
+        "duration_minutes": 10,
+        "during": [
+          {
+            "kind": "labor"
+          }
+        ],
+        "completion": "activity",
+        "conditions": [],
+        "supply": {
+          "initial": 1,
+          "cost": 1,
+          "restock": {
+            "amount": 1,
+            "max": 1
+          }
+        },
+        "on_complete": [
+          {
+            "kind": "give_item",
+            "count": 1,
+            "item": {
+              "id": "core:island-herbs",
+              "version": 1,
+              "name": "草药",
+              "description": "一把能退烧的草药，嚼碎了敷上、煎水喝都行，只够用一次。",
+              "portable": true,
+              "actions": [
+                {
+                  "id": "cure",
+                  "label": "用草药治病",
+                  "duration_minutes": 10,
+                  "completion": "activity",
+                  "consumes_item": true,
+                  "recipient": true,
+                  "on_complete": [
+                    {
+                      "kind": "cure_condition",
+                      "condition": "illness"
+                    }
+                  ]
+                }
+              ]
+            }
+          }
+        ]
+      },
+      {
+        "id": "pick_branches",
+        "label": "捡枯枝",
+        "duration_minutes": 10,
+        "during": [
+          {
+            "kind": "labor"
+          }
+        ],
+        "completion": "activity",
+        "conditions": [],
+        "supply": {
+          "initial": 2,
+          "cost": 1,
+          "restock": {
+            "amount": 1,
+            "max": 3
+          }
+        },
+        "on_complete": [
+          {
+            "kind": "give_item",
+            "count": 1,
+            "item": {
+              "id": "core:firewood",
+              "version": 1,
+              "name": "一捆枯枝",
+              "description": "干枯的枝条，可以生火或搭东西。",
+              "portable": true,
+              "stack_limit": 5,
+              "actions": []
+            }
+          }
+        ]
       }
     ]
   },
@@ -1170,6 +1324,7 @@
             "amount": 50.0
           }
         ],
+        "portion_name": "一份饭",
         "supply": {
           "initial": 100,
           "cost": 1
@@ -1203,6 +1358,7 @@
             "amount": 10
           }
         ],
+        "portion_name": "一杯咖啡",
         "supply": {
           "initial": 50,
           "cost": 1
@@ -1254,6 +1410,7 @@
             "amount": 25.0
           }
         ],
+        "portion_name": "一份点心",
         "supply": {
           "initial": 100,
           "cost": 1
@@ -1306,6 +1463,7 @@
             "amount": 25.0
           }
         ],
+        "portion_name": "一份干粮",
         "supply": {
           "initial": 100,
           "cost": 1
@@ -1318,7 +1476,7 @@
     "id": "core:drinking_water",
     "version": 1,
     "name": "饮用水桶",
-    "description": "可饮用的清水；一份补充 35 点水分，可帮助在场村民补水。",
+    "description": "可饮用的清水；一份补充 45 点水分，可帮助在场村民补水。",
     "actions": [
       {
         "id": "drink",
@@ -1331,10 +1489,11 @@
           {
             "kind": "restore",
             "need": "water",
-            "amount": 35
+            "amount": 45
           }
         ],
         "recipient": true,
+        "portion_name": "一壶水",
         "supply": {
           "initial": 200,
           "cost": 1
@@ -1395,6 +1554,7 @@
           }
         ],
         "recipient": true,
+        "portion_name": "一卷绷带",
         "supply": {
           "initial": 20,
           "cost": 1
@@ -1414,6 +1574,7 @@
           }
         ],
         "recipient": true,
+        "portion_name": "一剂药",
         "supply": {
           "initial": 20,
           "cost": 1
@@ -1433,6 +1594,7 @@
           }
         ],
         "recipient": true,
+        "portion_name": "一支解毒剂",
         "supply": {
           "initial": 20,
           "cost": 1
@@ -1453,6 +1615,7 @@
           }
         ],
         "recipient": true,
+        "portion_name": "一份急救药",
         "supply": {
           "initial": 20,
           "cost": 1
@@ -1570,6 +1733,7 @@
           }
         ],
         "recipient": true,
+        "portion_name": "一卷绷带",
         "supply": {
           "initial": 20,
           "cost": 1
@@ -1589,6 +1753,7 @@
           }
         ],
         "recipient": true,
+        "portion_name": "一剂药",
         "supply": {
           "initial": 20,
           "cost": 1
@@ -1608,6 +1773,7 @@
           }
         ],
         "recipient": true,
+        "portion_name": "一支解毒剂",
         "supply": {
           "initial": 20,
           "cost": 1
@@ -1628,6 +1794,7 @@
           }
         ],
         "recipient": true,
+        "portion_name": "一份急救药",
         "supply": {
           "initial": 20,
           "cost": 1
@@ -1765,6 +1932,15 @@
     "version": 1,
     "name": "一朵野花",
     "description": "可拾取、赠予和摆放的花。",
+    "portable": true,
+    "stack_limit": 5,
+    "actions": []
+  },
+  {
+    "id": "core:firewood",
+    "version": 1,
+    "name": "一捆枯枝",
+    "description": "干枯的枝条，可以生火或搭东西。",
     "portable": true,
     "stack_limit": 5,
     "actions": []

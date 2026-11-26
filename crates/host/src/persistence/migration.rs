@@ -25,6 +25,8 @@ pub(super) enum Backup {
     DepartedPossession,
     /// 预制开局加入持久化计划，升级前完整保留原档。
     PrefabSetup,
+    /// 道具目录等内容变化，旧 world_key 仍在兼容表里；接受前完整保留原档。
+    Content,
 }
 
 impl Backup {
@@ -37,6 +39,7 @@ impl Backup {
             Backup::CommissionRemoval => ".before-commission-removal",
             Backup::History => ".before-history-v1",
             Backup::DepartedPossession => ".before-departed-possession-v1",
+            Backup::Content => ".before-content-upgrade",
         }
     }
     pub(super) fn label(&self) -> &'static str {
@@ -48,6 +51,7 @@ impl Backup {
             Backup::CommissionRemoval => "旧委托已迁出运行状态，原始存档备份",
             Backup::History => "历史拆成流水前的原始存档",
             Backup::DepartedPossession => "离场附身修复前的原始存档",
+            Backup::Content => "场景内容升级前的原始存档",
         }
     }
     /// 备份目录里附带的说明文件名；内容是兼容标识表本身。
@@ -59,7 +63,8 @@ impl Backup {
             | Backup::Weather
             | Backup::History
             | Backup::DepartedPossession
-            | Backup::PrefabSetup => None,
+            | Backup::PrefabSetup
+            | Backup::Content => None,
         }
     }
 }

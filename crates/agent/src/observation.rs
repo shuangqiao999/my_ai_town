@@ -1,6 +1,12 @@
 //! 只投影本人状态、眼前对象与已知地图。观察仪的世界全貌不进入村民上下文。
 use crate::{interaction, prompts, resident, AgentError};
-use kernel::{intent::BuiltinVerb, props::Condition, topology::Prop, world::ActKind, World};
+use kernel::{
+    intent::BuiltinVerb,
+    props::{Action, Condition, InstantEffect},
+    topology::Prop,
+    world::ActKind,
+    World,
+};
 use protocol::{BodyConditionKind, FactKind, Need, NeedBand};
 use serde_json::{json, Value};
 use std::cmp::Ordering;
@@ -41,12 +47,77 @@ struct Supply {
     condition: Option<BodyConditionKind>,
     locale: String,
     name: String,
+    prop: String,
     verb: String,
+    /// 一次动作能补多少；治疗状况（不是恢复健康）时为空。
+    gain: Option<u32>,
     remaining: Option<u32>,
+    /// 这个来源能领取一份带走时，来源动作和份名。
+    take_action: Option<String>,
+    portion: Option<String>,
+    /// 有限补给还有剩；不限量或没有补给字段也算可用。
+    usable: bool,
     /// 供餐时段说明；只在不限时以外的食物动作上有。
     serving: Option<String>,
     here: bool,
     home: bool,
+}
+
+/// 完成时恢复某项需求的量；`Chance` 里的效果也算。
+fn instant_restore(effect: &InstantEffect, need: Need) -> f64 {
+    match effect {
+        InstantEffect::Restore {
+            need: restored,
+            amount,
+        } if *restored == need => *amount,
+        InstantEffect::Chance { effects, .. } => {
+            effects.iter().map(|e| instant_restore(e, need)).sum()
+        }
+        _ => 0.0,
+    }
+}
+
+/// 一次动作能补多少：过程恢复按每分钟速率乘时长，完成时恢复直接相加。
+fn restore_points(spot: &kernel::affordance::Spot, need: Need) -> f64 {
+    let rate = match need {
+        Need::Water => spot.water_rate,
+        Need::Fullness => spot.fullness_rate,
+        Need::Health => spot.health_rate,
+        Need::Energy => 0.0,
+    };
+    let during = rate * spot.minutes;
+    let on_complete = spot.action.as_ref().map_or(0.0, |action| {
+        action
+            .on_complete
+            .iter()
+            .map(|effect| instant_restore(effect, need))
+            .sum()
+    });
+    during + on_complete
+}
+
+/// 动作的起始条件此刻是否满足。
+fn action_available(world: &World, actor: &str, locale: &str, action: &Action) -> bool {
+    action.conditions.iter().all(|condition| match condition {
+        Condition::MealWindow => {
+            world.topo.meals.is_empty()
+                || kernel::calendar::meal_at(&world.topo.meals, world.minutes()).is_some()
+        }
+        Condition::OwnHome => world.actor(actor).and_then(|a| a.home.as_deref()) == Some(locale),
+    })
+}
+
+/// 给动作视图补上「此刻能不能开始」和供餐时段；没有条件的动作不写。
+fn with_conditions(view: &mut Value, world: &World, actor: &str, locale: &str, action: &Action) {
+    if action.conditions.is_empty() {
+        return;
+    }
+    view["available"] = json!(action_available(world, actor, locale, action));
+    if action.conditions.contains(&Condition::MealWindow) {
+        if let Some(serving) = serving_text(world) {
+            view["serving"] = json!(serving);
+        }
+    }
 }
 
 /// 一天内的分钟数写成 HH:MM。
@@ -124,17 +195,35 @@ fn known_supplies(world: &World, actor: &str, a: &kernel::world::Actor) -> Vec<S
                 .action
                 .as_ref()
                 .and_then(|action| world.props().supply_remaining(&spot.prop, action));
-            if remaining == Some(0) {
-                continue;
-            }
             let mut push = |kind: SupplyKind, condition: Option<BodyConditionKind>| {
+                let need = match kind {
+                    SupplyKind::Water => Some(Need::Water),
+                    SupplyKind::Food => Some(Need::Fullness),
+                    SupplyKind::Health if condition.is_none() => Some(Need::Health),
+                    SupplyKind::Health => None,
+                };
+                let gain = need.and_then(|need| {
+                    let points = restore_points(spot, need);
+                    (points > 0.0).then(|| points.round() as u32)
+                });
+                let (take_action, portion) = spot
+                    .action
+                    .as_ref()
+                    .filter(|action| action.portion_name.is_some() && action.supply.is_some())
+                    .map(|action| (Some(action.id.clone()), action.portion_name.clone()))
+                    .unwrap_or((None, None));
                 supplies.push(Supply {
                     kind,
                     condition,
                     locale: locale.clone(),
                     name: place.name.clone(),
+                    prop: spot.prop.clone(),
                     verb: spot.verb.clone(),
+                    gain,
                     remaining,
+                    take_action,
+                    portion,
+                    usable: remaining != Some(0),
                     serving: (kind == SupplyKind::Food)
                         .then(|| food_serving(world, spot))
                         .flatten(),
@@ -172,7 +261,7 @@ fn supply_index(world: &World, actor: &str, a: &kernel::world::Actor) -> Vec<Val
     let mut seen = std::collections::BTreeSet::new();
     let mut out = Vec::new();
     for s in known_supplies(world, actor, a) {
-        if !seen.insert((s.locale.clone(), s.kind.label())) {
+        if s.remaining == Some(0) || !seen.insert((s.locale.clone(), s.kind.label())) {
             continue;
         }
         let mut view = json!({
@@ -181,6 +270,18 @@ fn supply_index(world: &World, actor: &str, a: &kernel::world::Actor) -> Vec<Val
             "name": s.name,
             "verb": s.verb
         });
+        if let Some(gain) = s.gain {
+            view["gain"] = json!(gain);
+        }
+        if s.remaining.is_none() {
+            view["unlimited"] = json!(true);
+        }
+        if let Some(take_action) = &s.take_action {
+            view["take_action"] = json!(take_action);
+        }
+        if let Some(portion) = &s.portion {
+            view["portion"] = json!(portion);
+        }
         if let Some(serving) = &s.serving {
             view["serving"] = json!(serving);
         }
@@ -225,6 +326,7 @@ fn survival_hints(world: &World, actor: &str, a: &kernel::world::Actor) -> Optio
         };
         rank(x.kind)
             .cmp(&rank(y.kind))
+            .then(y.usable.cmp(&x.usable))
             .then_with(|| {
                 if x.kind == SupplyKind::Food {
                     serving_open(world, y.serving.as_deref())
@@ -233,7 +335,10 @@ fn survival_hints(world: &World, actor: &str, a: &kernel::world::Actor) -> Optio
                     Ordering::Equal
                 }
             })
-            .then_with(|| supply_order(x, y))
+            .then(y.gain.cmp(&x.gain))
+            .then(y.here.cmp(&x.here))
+            .then(y.home.cmp(&x.home))
+            .then(x.name.cmp(&y.name))
     });
     let mut seen = std::collections::BTreeSet::new();
     let mut hints = Vec::new();
@@ -244,14 +349,26 @@ fn survival_hints(world: &World, actor: &str, a: &kernel::world::Actor) -> Optio
         let mut hint = json!({
             "need": s.kind.label(),
             "place": s.locale,
+            "prop_id": s.prop,
             "name": s.name,
             "verb": s.verb
         });
+        if let Some(gain) = s.gain {
+            hint["gain"] = json!(gain);
+        }
         if let Some(minutes) = world.travel_minutes(actor, &s.locale) {
             hint["minutes"] = json!(minutes.round().max(0.0) as u32);
         }
         if let Some(remaining) = s.remaining {
             hint["remaining"] = json!(remaining);
+        } else {
+            hint["unlimited"] = json!(true);
+        }
+        if let Some(take_action) = &s.take_action {
+            hint["take_action"] = json!(take_action);
+        }
+        if let Some(portion) = &s.portion {
+            hint["portion"] = json!(portion);
         }
         if s.kind == SupplyKind::Food {
             if let Some(serving) = &s.serving {
@@ -284,7 +401,7 @@ fn treatment_hints(world: &World, actor: &str, a: &kernel::world::Actor) -> Opti
     if conditions.is_empty() && !health_low {
         return None;
     }
-    let supplies: Vec<Supply> = known_supplies(world, actor, a)
+    let mut supplies: Vec<Supply> = known_supplies(world, actor, a)
         .into_iter()
         .filter(|s| s.kind == SupplyKind::Health)
         .filter(|s| match s.condition {
@@ -292,6 +409,14 @@ fn treatment_hints(world: &World, actor: &str, a: &kernel::world::Actor) -> Opti
             None => health_low,
         })
         .collect();
+    supplies.sort_by(|x, y| {
+        y.usable
+            .cmp(&x.usable)
+            .then(y.here.cmp(&x.here))
+            .then(y.home.cmp(&x.home))
+            .then(y.gain.cmp(&x.gain))
+            .then(x.name.cmp(&y.name))
+    });
     let mut seen = std::collections::BTreeSet::new();
     let mut hints = Vec::new();
     for s in supplies {
@@ -303,6 +428,7 @@ fn treatment_hints(world: &World, actor: &str, a: &kernel::world::Actor) -> Opti
         }
         let mut hint = json!({
             "place": s.locale,
+            "prop_id": s.prop,
             "name": s.name,
             "verb": s.verb
         });
@@ -310,11 +436,22 @@ fn treatment_hints(world: &World, actor: &str, a: &kernel::world::Actor) -> Opti
             Some(condition) => hint["condition"] = json!(condition.label()),
             None => hint["need"] = json!("健康"),
         }
+        if let Some(gain) = s.gain {
+            hint["gain"] = json!(gain);
+        }
         if let Some(minutes) = world.travel_minutes(actor, &s.locale) {
             hint["minutes"] = json!(minutes.round().max(0.0) as u32);
         }
         if let Some(remaining) = s.remaining {
             hint["remaining"] = json!(remaining);
+        } else {
+            hint["unlimited"] = json!(true);
+        }
+        if let Some(take_action) = &s.take_action {
+            hint["take_action"] = json!(take_action);
+        }
+        if let Some(portion) = &s.portion {
+            hint["portion"] = json!(portion);
         }
         if s.here {
             hint["here"] = json!(true);
@@ -433,18 +570,39 @@ fn stored_view(world: &World, actor: &str, container: &str) -> Vec<Value> {
     )
 }
 
+/// 这件道具上可以领取带走的一份：动作、份名、来源还剩多少。
+fn portions_view(world: &World, p: &kernel::topology::Prop) -> Vec<Value> {
+    p.verbs
+        .iter()
+        .filter_map(|v| {
+            let action = v.action.as_ref()?;
+            let name = action.portion_name.as_ref()?;
+            let remaining = world.props().supply_remaining(&p.id, action)?;
+            Some(json!({
+                "action_id": action.id,
+                "name": name,
+                "remaining": remaining
+            }))
+        })
+        .collect()
+}
+
 fn prop_view(world: &World, actor: &str, p: &kernel::topology::Prop) -> Value {
     let verbs: Vec<_> = p
         .verbs
         .iter()
         .map(|v| {
-            json!({
+            let mut view = json!({
                 "verb": v.verb,
                 "action_id": v.action.as_ref().map(|a| &a.id),
                 "minutes": v.duration_minutes,
                 "description": v.action.as_ref().map(|a| kernel::props::action_description_for(a, world.physiology())),
                 "remaining": v.action.as_ref().and_then(|a| world.props().supply_remaining(&p.id, a))
-            })
+            });
+            if let Some(action) = &v.action {
+                with_conditions(&mut view, world, actor, &p.locale, action);
+            }
+            view
         })
         .collect();
     let mut view = json!({
@@ -458,6 +616,10 @@ fn prop_view(world: &World, actor: &str, p: &kernel::topology::Prop) -> Value {
         "bulletin_board": p.bulletin_board,
         "verbs": verbs
     });
+    let portions = portions_view(world, p);
+    if !portions.is_empty() {
+        view["portions"] = json!(portions);
+    }
     with_description(&mut view, p);
     // 别人正在用：看得出要等，不必试了才知道（回声湾一台咖啡机三个人抢，第一个小时失败 6 次）。
     // 没人用时不带这一栏，和原来一字不差。
@@ -752,6 +914,9 @@ pub fn inspect(world: &World, actor: &str, id: &str) -> Result<Value, AgentError
                         action[key] = json!(rate);
                     }
                 }
+                if let Some(definition) = &v.action {
+                    with_conditions(&mut action, world, actor, &prop.locale, definition);
+                }
                 Some(action)
             })
             .collect();
@@ -767,6 +932,10 @@ pub fn inspect(world: &World, actor: &str, id: &str) -> Result<Value, AgentError
             "actions": actions,
             "occupants": world.prop_occupants(&prop.id)
         });
+        let portions = portions_view(world, prop);
+        if !portions.is_empty() {
+            view["portions"] = json!(portions);
+        }
         with_description(&mut view, prop);
         return Ok(view);
     }

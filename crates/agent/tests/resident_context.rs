@@ -537,6 +537,10 @@ fn place(w: &mut World, id: &str, locale: &str, definition: Value) {
 
 /// 在 loc_b 放一个饮用水桶。定义照 fixtures/props.json 的 test:water 抄，补给 200 份。
 fn place_water(w: &mut World, id: &str, locale: &str) {
+    place_water_supply(w, id, locale, 200);
+}
+
+fn place_water_supply(w: &mut World, id: &str, locale: &str, initial: u32) {
     place(
         w,
         id,
@@ -545,7 +549,7 @@ fn place_water(w: &mut World, id: &str, locale: &str) {
             "id":"test:water","version":1,"name":"饮用水桶","description":"可饮用的清水。",
             "actions":[{"id":"drink","label":"饮水","duration_minutes":3,"during":[],"completion":"activity",
                 "conditions":[],"on_complete":[{"kind":"restore","need":"water","amount":35}],
-                "recipient":true,"supply":{"initial":200,"cost":1}}]
+                "recipient":true,"portion_name":"一壶水","supply":{"initial":initial,"cost":1}}]
         }),
     );
 }
@@ -584,6 +588,16 @@ fn observed(q: &AgentRequest) -> Value {
         .clone()
 }
 
+fn visible_prop(q: &AgentRequest, id: &str) -> Value {
+    observed(q)["visible_props"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|prop| prop["id"] == id)
+        .cloned()
+        .unwrap_or_else(|| panic!("observation 里没有 {id}"))
+}
+
 fn thirst() -> NeedValues<Option<f64>> {
     NeedValues {
         water: Some(20.0),
@@ -613,7 +627,12 @@ fn urgent_thirst_lists_known_water_places_for_the_model() {
         .find(|hint| hint["place"] == "loc_b")
         .expect("要指向乙地的水桶");
     assert_eq!(water["need"], "水");
+    assert_eq!(water["prop_id"], "water_b");
     assert_eq!(water["verb"], "饮水");
+    assert_eq!(water["gain"], 35);
+    assert_eq!(water["remaining"], 200);
+    assert_eq!(water["take_action"], "drink");
+    assert_eq!(water["portion"], "一壶水");
     assert_eq!(water["minutes"], 2, "甲地到乙地要走两分钟");
 }
 
@@ -701,6 +720,7 @@ fn injury_lists_known_treatment_places() {
         .find(|hint| hint["place"] == "loc_b")
         .expect("要指向乙地的药箱");
     assert_eq!(treatment["condition"], "受伤");
+    assert_eq!(treatment["prop_id"], "kit_b");
     assert_eq!(treatment["verb"], "包扎伤口");
     assert_eq!(treatment["minutes"], 2);
     assert_eq!(treatment["remaining"], 20);
@@ -717,4 +737,74 @@ fn survival_thoughts_are_tagged_in_the_diary() {
     reply(&mut r, &mut w, &q, "observe", json!({}));
     let thought = w.actor("r1").unwrap().journal.thought.as_ref().unwrap();
     assert_eq!(thought.trigger_info.text, "生理紧急");
+}
+
+/// 用光的补给点也列出来，但排在能用点后面；模型能看见 remaining:0。
+#[test]
+fn exhausted_supplies_are_marked_zero_after_usable_ones() {
+    let mut w = world();
+    place_water(&mut w, "water_b", "loc_b");
+    place_water_supply(&mut w, "water_dry", "loc_a", 0);
+    w.adjust_body("r1", thirst()).unwrap();
+    let mut r = runtime(&mut w, spacious());
+    let q = life_request(&mut r, &mut w);
+    let hints = observed(&q)["survival_hints"]
+        .as_array()
+        .cloned()
+        .unwrap_or_default();
+    assert_eq!(hints[0]["place"], "loc_b", "能用的排前面：{hints:?}");
+    let dry = hints
+        .iter()
+        .find(|hint| hint["prop_id"] == "water_dry")
+        .expect("用光的点也要列出");
+    assert_eq!(dry["remaining"], 0);
+}
+
+/// 眼前能领取的道具要列出 portions；居民据此把一份装进口袋。
+#[test]
+fn portions_are_listed_on_the_prop_in_observation() {
+    let mut w = world();
+    place_water(&mut w, "water_a", "loc_a");
+    let mut r = runtime(&mut w, spacious());
+    let q = life_request(&mut r, &mut w);
+    let portions = visible_prop(&q, "water_a")["portions"].clone();
+    assert_eq!(portions[0]["action_id"], "drink");
+    assert_eq!(portions[0]["name"], "一壶水");
+    assert_eq!(portions[0]["remaining"], 200);
+}
+
+/// 食堂动作在观察里直接标出此刻能不能开始，并给供餐时段。
+#[test]
+fn meal_actions_say_whether_they_can_start_now() {
+    let mut w = world();
+    place_meal(&mut w, "meal_a", "loc_a");
+    w.topo.meals = vec![kernel::topology::MealWindow {
+        name: "午饭".into(),
+        start: 690.0,
+        end: 810.0,
+        menu: "米饭".into(),
+    }];
+    let mut r = runtime(&mut w, spacious());
+    let q = life_request(&mut r, &mut w);
+    let eat = visible_prop(&q, "meal_a")["verbs"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|verb| verb["verb"] == "吃饭")
+        .cloned()
+        .unwrap();
+    assert_eq!(eat["available"], false, "早上七点还没到午饭");
+    assert!(eat["serving"].as_str().unwrap().contains("午饭"));
+    reply(&mut r, &mut w, &q, "observe", json!({}));
+
+    w.step(300.0);
+    let q = life_request(&mut r, &mut w);
+    let eat = visible_prop(&q, "meal_a")["verbs"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|verb| verb["verb"] == "吃饭")
+        .cloned()
+        .unwrap();
+    assert_eq!(eat["available"], true, "中午十二点应该能吃饭");
 }

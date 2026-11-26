@@ -16,6 +16,8 @@ use serde_json::{json, Value};
 
 /// 整理轮次里回看阅读内容的来回上限；超过就结束这一批，下次再整理。
 const READING_DIALOGUE_MAX: usize = 12;
+/// 一次醒来里，生活轮次只有想法没有动作时最多提醒几次；再多就按原来的等待处理。
+const NO_ACTION_NUDGES: u32 = 2;
 
 /// host 交回的一次模型回复。
 struct ReplyEnvelope {
@@ -427,6 +429,27 @@ impl ResidentRuntime {
             .last()
             .is_some_and(|m| m.role == Role::Assistant && m.calls.is_empty());
         if !thinking_done {
+            if !outdated {
+                s.streaks.no_action = 0;
+                s.streaks.nudge = None;
+            }
+            return;
+        }
+        if !outdated
+            && s.streaks.no_action < NO_ACTION_NUDGES
+            && s.wake_calls() < self.state.limits.calls_per_wake
+        {
+            s.streaks.no_action += 1;
+            s.streaks.nudge = Some(prompts::NO_ACTION_REMINDER.into());
+            self.record(
+                world,
+                s,
+                Trace::new(
+                    "no_action_reminder",
+                    json!({"count": s.streaks.no_action, "calls": s.wake_calls()}),
+                ),
+            );
+            s.memory.consolidate(world, &s.actor_id);
             return;
         }
         let delivered = s.cursors.delivered;

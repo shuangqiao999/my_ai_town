@@ -4,11 +4,60 @@ use std::{
     io::{self, Read, Write},
     net::{Ipv4Addr, SocketAddr, TcpListener, TcpStream},
     sync::mpsc::{self, Receiver},
-    time::Duration,
+    time::{Duration, Instant},
 };
 
 const PREFIX: &[u8] = b"town-save-and-close-v1\n";
 const IO_TIMEOUT: Duration = Duration::from_secs(1);
+
+/// 这次读写没完成，可以接着等；Windows 短超时会返回 ERROR_IO_PENDING（997）。
+fn transient(error: &io::Error) -> bool {
+    matches!(
+        error.kind(),
+        io::ErrorKind::TimedOut | io::ErrorKind::WouldBlock
+    ) || error.raw_os_error() == Some(997)
+}
+
+fn read_exact_retry(stream: &mut TcpStream, buf: &mut [u8]) -> io::Result<()> {
+    let deadline = Instant::now() + IO_TIMEOUT;
+    let mut filled = 0;
+    while filled < buf.len() {
+        match stream.read(&mut buf[filled..]) {
+            Ok(0) => {
+                return Err(io::Error::new(
+                    io::ErrorKind::UnexpectedEof,
+                    "关闭请求提前结束",
+                ))
+            }
+            Ok(n) => filled += n,
+            Err(e) if transient(&e) => {
+                if Instant::now() >= deadline {
+                    return Err(e);
+                }
+            }
+            Err(e) => return Err(e),
+        }
+    }
+    Ok(())
+}
+
+fn write_all_retry(stream: &mut TcpStream, buf: &[u8]) -> io::Result<()> {
+    let deadline = Instant::now() + IO_TIMEOUT;
+    let mut written = 0;
+    while written < buf.len() {
+        match stream.write(&buf[written..]) {
+            Ok(0) => return Err(io::Error::new(io::ErrorKind::WriteZero, "关闭回执写入失败")),
+            Ok(n) => written += n,
+            Err(e) if transient(&e) => {
+                if Instant::now() >= deadline {
+                    return Err(e);
+                }
+            }
+            Err(e) => return Err(e),
+        }
+    }
+    Ok(())
+}
 
 pub struct Control {
     pub port: u16,
@@ -31,7 +80,7 @@ impl Control {
                     continue;
                 }
                 let mut request = vec![0; expected.len()];
-                if stream.read_exact(&mut request).is_ok() && request == expected {
+                if read_exact_retry(&mut stream, &mut request).is_ok() && request == expected {
                     let _ = send.try_send(stream);
                 }
             }
@@ -50,12 +99,12 @@ pub fn request(port: u16, token: &str) -> io::Result<TcpStream> {
     let mut stream = TcpStream::connect_timeout(&address, IO_TIMEOUT)?;
     stream.set_write_timeout(Some(IO_TIMEOUT))?;
     stream.set_read_timeout(Some(Duration::from_millis(50)))?;
-    stream.write_all(&[PREFIX, token.as_bytes()].concat())?;
+    write_all_retry(&mut stream, &[PREFIX, token.as_bytes()].concat())?;
     Ok(stream)
 }
 
 pub fn reply(stream: &mut TcpStream, saved: bool) -> io::Result<()> {
-    stream.write_all(if saved { b"S" } else { b"F" })
+    write_all_retry(stream, if saved { b"S" } else { b"F" })
 }
 
 pub fn receive(stream: &mut TcpStream) -> io::Result<Option<bool>> {
@@ -66,14 +115,7 @@ pub fn receive(stream: &mut TcpStream) -> io::Result<Option<bool>> {
             b'F' => Ok(Some(false)),
             _ => Err(io::Error::new(io::ErrorKind::InvalidData, "无效关闭回执")),
         },
-        Err(e)
-            if matches!(
-                e.kind(),
-                io::ErrorKind::TimedOut | io::ErrorKind::WouldBlock
-            ) =>
-        {
-            Ok(None)
-        }
+        Err(e) if transient(&e) => Ok(None),
         Err(e) => Err(e),
     }
 }

@@ -305,6 +305,36 @@ fn outdated_replies_are_counted_and_two_revision_conflicts_in_a_row_stop_only_th
     assert_eq!((usage.replies, usage.stale_replies), (4, 3));
 }
 
+/// 生活轮次只有想法、没有工具调用：先带 reminder 再问，最多两次，之后才回到原来的等待。
+#[test]
+fn a_thought_only_life_round_gets_a_bounded_reminder() {
+    let mut w = world();
+    let mut r = runtime(&mut w, Limits::default());
+    let q = life_request(&mut r, &mut w);
+    assert!(reply_with(&mut r, &mut w, &q, "我应该去喝水。", vec![]));
+    let q = life_request(&mut r, &mut w);
+    let body: serde_json::Value =
+        serde_json::from_str(&q.messages.last().unwrap().content).unwrap();
+    assert!(
+        body["reminder"]
+            .as_str()
+            .is_some_and(|text| text.contains("只有想法")),
+        "{body}"
+    );
+
+    assert!(reply_with(&mut r, &mut w, &q, "我还是应该去喝水。", vec![]));
+    let q = life_request(&mut r, &mut w);
+    let body: serde_json::Value =
+        serde_json::from_str(&q.messages.last().unwrap().content).unwrap();
+    assert!(body["reminder"]
+        .as_str()
+        .is_some_and(|text| text.contains("只有想法")));
+
+    assert!(reply_with(&mut r, &mut w, &q, "再想想。", vec![]));
+    assert!(r.poll(&mut w, true).is_empty(), "提醒两次后不再立刻追问");
+    assert!(r.session("r1").unwrap().sleep().is_some(), "回到原来的等待");
+}
+
 #[test]
 fn repeated_model_failures_pause_the_town_after_bounded_retries() {
     let mut w = world();

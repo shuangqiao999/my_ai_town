@@ -406,7 +406,7 @@ impl Action {
                     && self.supply.is_some()
                     && !self.on_complete.is_empty()
                     && !self.consumes_item
-                    && self.completion == Completion::Activity,
+                    && matches!(self.completion, Completion::Activity | Completion::Meal),
                 KernelError::props("领取单份须填写 1–80 字名称，并使用有限补给及普通完成效果")
             );
         }

@@ -279,6 +279,9 @@ impl ResidentRuntime {
             "observation".into(),
             omit_unchanged(s, &view::slim(observation)),
         );
+        if let Some(reminder) = &s.streaks.nudge {
+            body.insert("reminder".into(), json!(reminder));
+        }
         if let Some(source) = s.input.summary_source {
             body.insert("earlier_summary".into(), json!({"context_source":source}));
         }

@@ -193,6 +193,12 @@ pub struct Streaks {
     /// 生活轮次模型请求失败后，最早再发请求的现实时刻（unix 秒）。只在内存里：重启后直接重试。
     #[serde(skip)]
     pub retry_at: u64,
+    /// 上一轮只有想法、没有动作时，下一轮带给模型的提醒；发出请求后清掉。
+    #[serde(skip)]
+    pub nudge: Option<String>,
+    /// 本次醒来连续没有工具调用的生活轮次数；有动作或重新醒来就清零。
+    #[serde(skip)]
+    pub no_action: u32,
 }
 
 /// 折叠后的历史与精确计数的前缀。
@@ -563,6 +569,8 @@ impl Session {
     pub(crate) fn wake_up(&mut self) {
         self.wake.sleep = None;
         self.wake.wake_calls = 0;
+        self.streaks.no_action = 0;
+        self.streaks.nudge = None;
     }
     /// 安排被外部改变（接管、交还、世界设定变化）：结束等待、重新计唤醒，精确计数作废。
     pub(crate) fn restart_after_interruption(&mut self) {
