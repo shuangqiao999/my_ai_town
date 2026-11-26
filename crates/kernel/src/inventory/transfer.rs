@@ -280,15 +280,22 @@ impl Inventory {
             .iter()
             .map(|p| crate::props::catalog::resolve(&p.instance, &p.definition))
             .collect::<Result<Vec<_>, _>>()?;
-        let existing = cx
+        let existing: Vec<_> = cx
             .topo
             .props()
             .iter()
-            .filter(|p| !p.withdrawn && self.carried_by(&p.id, &actor.id));
-        ensure!(
-            Self::slots_used(cx.props, existing.chain(resolved.iter())) <= CAPACITY,
-            KernelError::inventory("背包容量不足，未领取任何物品")
-        );
+            .filter(|p| !p.withdrawn && self.carried_by(&p.id, &actor.id))
+            .collect();
+        let used = Self::slots_used(cx.props, existing.iter().copied().chain(resolved.iter()));
+        if used > CAPACITY {
+            let carried = Self::slots_used(cx.props, existing.iter().copied());
+            return Err(KernelError::inventory(self.bag_full_message(
+                cx.topo,
+                &actor.id,
+                carried,
+                "未领取任何物品",
+            )));
+        }
         check_room(cx.topo.props().len(), resolved.len())?;
         Ok(())
     }

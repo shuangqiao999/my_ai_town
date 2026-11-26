@@ -207,13 +207,32 @@ pub(crate) fn check_start_conditions(w: &World, actor: &str, spot: &Spot) -> Res
         )
     };
     let shared = reads_notice(spot.action.as_ref());
+    let users: Vec<String> = w
+        .prop_occupants(&spot.prop)
+        .iter()
+        .filter(|other| other.as_str() != actor)
+        .map(|other| {
+            let a = &w.actors[other];
+            let left = a.current.left_text();
+            if left.is_empty() {
+                a.name.clone()
+            } else {
+                format!("{}（{}）", a.name, left)
+            }
+        })
+        .collect();
     ensure!(
         w.prop_occupants(&spot.prop)
             .iter()
             .all(|o| o == actor || (shared && reading_too(o))),
         KernelError::action(format!(
-            "道具 {} 正被其他村民使用；换同类或换地点",
-            spot.prop
+            "道具 {} 正被其他村民使用（{}）；先等一会、换同类或先做别的",
+            spot.prop,
+            if users.is_empty() {
+                "有人正在用".to_string()
+            } else {
+                users.join("、")
+            }
         ))
     );
     Ok(())

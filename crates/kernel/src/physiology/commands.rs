@@ -211,6 +211,7 @@ impl World {
         if !died && now == was {
             return;
         }
+        let just_critical = !died && now.incapacitated && !was.incapacitated;
         let text = match &cause.killed {
             _ if !died => reason.clone(),
             Some(k) => format!("遇害身亡，{}。原因：{source}", k.wound),
@@ -250,6 +251,27 @@ impl World {
             text,
             alert,
         );
+        if just_critical {
+            self.announce_critical(id);
+        }
+    }
+
+    /// 健康危重时让同地点的人收到一条事件，旁人不必靠猜。
+    fn announce_critical(&mut self, id: &str) {
+        let Some(actor) = self.actors.get(id) else {
+            return;
+        };
+        let (name, locale) = (actor.name.clone(), actor.locus.locale.clone());
+        let text = format!("{name} 健康危重，无法自主活动，需要救助");
+        for other in self.actor_ids() {
+            if other == id
+                || self.actors[&other].locus.locale != locale
+                || self.actors[&other].needs.body.dead
+            {
+                continue;
+            }
+            self.notify(&other, text.clone());
+        }
     }
 
     /// 测试用：直接设身体数值，摆出要验证的状态；None 表示不改。游戏里没有这个入口。

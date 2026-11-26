@@ -108,6 +108,31 @@ impl Inventory {
         }
         groups.values().map(|(n, limit)| n.div_ceil(*limit)).sum()
     }
+    /// 背包满时的回执：容量、可丢的随身物品，以及先腾空间。
+    pub(crate) fn bag_full_message(
+        &self,
+        topo: &Topology,
+        actor: &str,
+        used: usize,
+        tail: &str,
+    ) -> String {
+        let samples: Vec<String> = topo
+            .props()
+            .iter()
+            .filter(|p| {
+                !p.withdrawn
+                    && matches!(self.locations.get(&p.id), Some(Location::Carried { actor: owner }) if owner == actor)
+            })
+            .take(4)
+            .map(|p| format!("{}({})", p.name, p.id))
+            .collect();
+        let items = if samples.is_empty() {
+            "背包里没有别的物品".to_string()
+        } else {
+            format!("可丢：{}", samples.join("、"))
+        };
+        format!("背包已满（{used}/{CAPACITY}），先丢弃或存放，再拿新东西；{items}；{tail}")
+    }
     pub(crate) fn check_capacity(
         &self,
         topo: &Topology,
@@ -120,13 +145,31 @@ impl Inventory {
             Location::Stored { container } => props.item(topo, container)?.storage_slots as usize,
             Location::Ground { .. } => return Ok(()),
         };
-        let items = topo.props().iter().filter(|p| {
-            !p.withdrawn && (self.locations.get(&p.id) == Some(dest) || incoming.contains(&p.id))
-        });
-        ensure!(
-            Self::slots_used(props, items) <= capacity,
-            KernelError::inventory("目标容量不足，未转移任何物品")
-        );
+        let items: Vec<&Prop> = topo
+            .props()
+            .iter()
+            .filter(|p| {
+                !p.withdrawn
+                    && (self.locations.get(&p.id) == Some(dest) || incoming.contains(&p.id))
+            })
+            .collect();
+        let used = Self::slots_used(props, items.iter().copied());
+        if used > capacity {
+            let message = match dest {
+                Location::Carried { actor } => {
+                    let carried = Self::slots_used(
+                        props,
+                        topo.props().iter().filter(|p| {
+                            !p.withdrawn
+                                && matches!(self.locations.get(&p.id), Some(Location::Carried { actor: owner }) if owner == actor)
+                        }),
+                    );
+                    self.bag_full_message(topo, actor, carried, "未转移任何物品")
+                }
+                _ => format!("目标容量不足（{used}/{capacity}），未转移任何物品"),
+            };
+            return Err(KernelError::inventory(message));
+        }
         Ok(())
     }
     pub(crate) fn set_location(

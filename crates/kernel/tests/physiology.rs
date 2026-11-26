@@ -252,3 +252,18 @@ fn walking_costs_half_of_labor_on_energy_and_water() {
         .iter()
         .any(|c| c.contains("走路")));
 }
+
+#[test]
+fn a_critical_neighbor_is_announced_to_people_in_the_same_place() {
+    let mut w = world();
+    w.set_body_values("a", None, None, None, Some(1.0)).unwrap();
+    assert!(
+        w.actor("b")
+            .unwrap()
+            .journal
+            .events
+            .iter()
+            .any(|event| event.text.contains("健康危重")),
+        "同地点的人应收到求助线索"
+    );
+}

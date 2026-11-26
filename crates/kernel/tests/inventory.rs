@@ -302,3 +302,65 @@ fn portions_can_be_taken_while_someone_is_eating_from_the_same_supply() {
     assert_eq!(snapshot(&w)["supplies"]["source/eat"], 9);
     assert_eq!(w.inventory_view("a").slots[0].quantity, 1);
 }
+
+#[test]
+fn a_full_bag_says_what_to_drop_and_how_to_make_room() {
+    let mut w = world();
+    for i in 0..8 {
+        put(
+            &mut w,
+            &format!("bag{i}"),
+            json!({"name":format!("物品{i}"),"portable":true,"stack_limit":1}),
+        );
+        pick(&mut w, &format!("bag{i}"));
+    }
+    put(
+        &mut w,
+        "bag8",
+        json!({"name":"第九件","portable":true,"stack_limit":1}),
+    );
+    let error = transfer(
+        &mut w,
+        "a",
+        "full-bag",
+        Op::PickUp {
+            items: vec!["bag8".into()],
+        },
+    )
+    .unwrap_err()
+    .to_string();
+    assert!(error.contains("背包已满"), "{error}");
+    assert!(error.contains("丢弃或存放"), "{error}");
+    assert!(error.contains("物品0"), "{error}");
+}
+
+#[test]
+fn an_occupied_prop_receipt_names_the_user_and_the_way_out() {
+    let mut w = world();
+    source(&mut w);
+    common::run(
+        &mut w,
+        "b",
+        "eat-first",
+        json!({"intent":{"verb":"吃干粮"},"prop_id":"source"}),
+    )
+    .unwrap();
+    w.step(0.1);
+    common::run(
+        &mut w,
+        "a",
+        "eat-second",
+        json!({"intent":{"verb":"吃干粮"},"prop_id":"source"}),
+    )
+    .unwrap();
+    w.step(0.1);
+    let group = w.action_group("a", "eat-second").unwrap();
+    let error = group
+        .results
+        .iter()
+        .find_map(|result| result.reason.clone())
+        .unwrap_or_default();
+    assert!(error.contains("正被其他村民使用"), "{group:?}");
+    assert!(error.contains("乙"), "{group:?}");
+    assert!(error.contains("等一会"), "{group:?}");
+}
