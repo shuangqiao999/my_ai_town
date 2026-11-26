@@ -118,6 +118,16 @@ impl Inventory {
         Ok(&actor.locus.locale)
     }
     fn source_here<'a>(&self, cx: &Surroundings<'a>, actor: &Actor, id: &str) -> Result<&'a Prop> {
+        self.source_here_with(cx, actor, id, false)
+    }
+
+    fn source_here_with<'a>(
+        &self,
+        cx: &Surroundings<'a>,
+        actor: &Actor,
+        id: &str,
+        allow_use: bool,
+    ) -> Result<&'a Prop> {
         let locale = self.transfer_locale(cx.topo, actor)?;
         (cx.reach)(&actor.id, id)?;
         let p = cx.props.item(cx.topo, id)?;
@@ -126,7 +136,11 @@ impl Inventory {
             KernelError::inventory("物品或容器不在眼前")
         );
         check_property_access(cx.topo, actor, locale)?;
-        item_idle(cx.actors, cx.interactions, &actor.id, id)?;
+        if allow_use {
+            item_transferring(cx.actors, cx.interactions, &actor.id, id)?;
+        } else {
+            item_idle(cx.actors, cx.interactions, &actor.id, id)?;
+        }
         Ok(p)
     }
     /// 物品的操作点：随身没有；落地的在落地点；否则是道具自己的操作点（地图上有的话）。
@@ -243,7 +257,7 @@ impl Inventory {
     }
     /// 领取单份：只检查来源、数量、条件和背包容量；效果在使用那一份时才结算。
     fn check_take(&self, cx: &Surroundings, actor: &Actor, take: &Take) -> Result<()> {
-        let p = self.source_here(cx, actor, take.source)?;
+        let p = self.source_here_with(cx, actor, take.source, true)?;
         let a = portion_action(p, take.action)?;
         ensure!(
             (1..=TAKE_MAX).contains(&take.quantity),

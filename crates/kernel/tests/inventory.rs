@@ -271,3 +271,34 @@ fn a_medical_portion_can_be_taken_and_used_later() {
     assert!(w.actor("a").unwrap().needs.active_conditions().is_empty());
     assert!(!w.inventory().carried_by(&item, "a"));
 }
+
+/// 共用补给正在被一个人吃喝时，另一个人也能领取一份，不必等对方用完。
+#[test]
+fn portions_can_be_taken_while_someone_is_eating_from_the_same_supply() {
+    let mut w = world();
+    source(&mut w);
+    common::run(
+        &mut w,
+        "b",
+        "eat-b",
+        json!({"intent":{"verb":"吃干粮"},"prop_id":"source"}),
+    )
+    .unwrap();
+    w.step(0.1);
+    assert!(w.prop_occupants("source").contains(&"b".to_string()));
+
+    transfer(
+        &mut w,
+        "a",
+        "take-busy",
+        Op::Take {
+            source: "source".into(),
+            action: "eat".into(),
+            quantity: 1,
+        },
+    )
+    .unwrap();
+    finish(&mut w, "a", "take-busy");
+    assert_eq!(snapshot(&w)["supplies"]["source/eat"], 9);
+    assert_eq!(w.inventory_view("a").slots[0].quantity, 1);
+}

@@ -269,6 +269,37 @@ pub(crate) fn item_idle(
     Ok(())
 }
 
+/// 领取单份只挡住正在转移同一件东西的人；别人正在吃喝/使用这件补给，不妨碍
+/// 再领一份（水桶、干粮袋这类共用补给本来就该能同时取用）。
+pub(crate) fn item_transferring(
+    actors: &Actors,
+    interactions: &Interactions,
+    actor: &str,
+    id: &str,
+) -> Result<()> {
+    let busy = actors.iter().any(|(other, a)| {
+        other != actor && {
+            let in_transfer = a.current.action.as_ref().is_some_and(|b| {
+                b.draft
+                    .inventory
+                    .as_ref()
+                    .is_some_and(|i| i.items().iter().any(|p| p == id))
+            });
+            let in_gift = a
+                .current
+                .interaction
+                .as_ref()
+                .and_then(|key| interactions.get(key))
+                .is_some_and(|i| {
+                    matches!(&i.kind, protocol::InteractionKind::Give { items } if items.iter().any(|p| p == id))
+                });
+            in_transfer || in_gift
+        }
+    });
+    ensure!(!busy, KernelError::inventory("物品正在被其他村民转移"));
+    Ok(())
+}
+
 pub(crate) fn check_items(topo: &Topology, props: &Props, items: &[String]) -> Result<()> {
     ensure!(
         !items.is_empty()
