@@ -16,6 +16,8 @@ use serde_json::json;
 pub(crate) const POSTPONE_MINUTES: f64 = 30.0;
 /// 相同问题连续失败达到这个次数就搁置。回应邀请连续格式错误也按它，host 据此提示「暂缓后会重试」。
 pub const SAME_FAILURE_BEFORE_POSTPONE: u32 = 2;
+/// 动作提交连续失败达到这个次数就搁置；参数每次改一点也算，避免格式循环占满醒来时间。
+const ACTION_FAILURES_BEFORE_POSTPONE: u32 = 3;
 /// 模型以上下文超长拒收：达到这个次数起，折叠时一轮原文也不留。
 pub(crate) const CONTEXT_REJECTIONS_BEFORE_FULL_FOLD: u32 = 2;
 /// 模型以上下文超长拒收超过这个次数，生活决策故障停止。
@@ -82,6 +84,24 @@ impl ResidentRuntime {
             );
             self.record(world, s, Trace::new("wait", json!(s.sleep())));
         }
+    }
+
+    /// 动作提交连续失败（即使每次参数略有不同）达到次数就搁置，防止格式循环占满醒来时间。
+    pub(super) fn note_action_failure(&mut self, world: &World, s: &mut Session) {
+        s.streaks.action_failures += 1;
+        if s.streaks.action_failures < ACTION_FAILURES_BEFORE_POSTPONE {
+            return;
+        }
+        s.streaks.action_failures = 0;
+        let cursor = world.actor(&s.actor_id).map_or(0, |a| a.journal.cursor());
+        postpone(
+            s,
+            world.minutes(),
+            "连续三次动作提交失败，先停下来换件事做",
+            false,
+            cursor,
+        );
+        self.record(world, s, Trace::new("wait", json!(s.sleep())));
     }
 
     /// 模型请求失败（上下文超长另行处理）：连续失败达到额度里的次数就故障停止；

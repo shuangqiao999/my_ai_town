@@ -190,6 +190,9 @@ pub struct Streaks {
     /// 连续模型请求失败数；成功一次即清零。
     #[serde(default)]
     pub model_failures: u32,
+    /// 连续动作提交失败次数；成功提交或重新醒来清零。只在内存里。
+    #[serde(skip)]
+    pub action_failures: u32,
     /// 生活轮次模型请求失败后，最早再发请求的现实时刻（unix 秒）。只在内存里：重启后直接重试。
     #[serde(skip)]
     pub retry_at: u64,
@@ -570,6 +573,7 @@ impl Session {
         self.wake.sleep = None;
         self.wake.wake_calls = 0;
         self.streaks.no_action = 0;
+        self.streaks.action_failures = 0;
         self.streaks.nudge = None;
     }
     /// 安排被外部改变（接管、交还、世界设定变化）：结束等待、重新计唤醒，精确计数作废。

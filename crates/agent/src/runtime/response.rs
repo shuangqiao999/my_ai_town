@@ -356,8 +356,16 @@ impl ResidentRuntime {
                 None => self.run_tool(world, s, round.id, index, call),
             };
             let value = match outcome {
-                Ok(ToolOutcome::Complete(value)) => json!({"ok":true,"result":value}),
+                Ok(ToolOutcome::Complete(value)) => {
+                    if name == Some(ToolName::RunActions) {
+                        s.streaks.action_failures = 0;
+                    }
+                    json!({"ok":true,"result":value})
+                }
                 Ok(ToolOutcome::Pending(pending)) => {
+                    if name == Some(ToolName::RunActions) {
+                        s.streaks.action_failures = 0;
+                    }
                     s.pending.push(pending);
                     continue;
                 }
@@ -372,6 +380,10 @@ impl ResidentRuntime {
                         } else {
                             let problem = format!("{}:{}", call.name, call.arguments);
                             self.note_failure(world, s, &problem, &error.message);
+                        }
+                        if name == Some(ToolName::RunActions) {
+                            s.shown.observation_digests.remove("visible_props");
+                            self.note_action_failure(world, s);
                         }
                     }
                     error.result()

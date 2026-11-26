@@ -218,6 +218,10 @@ fn check_station(topo: &Topology, target: &Option<String>) -> Result<Option<Stri
         Some(t) => {
             if topo.stations.contains_key(t) {
                 Ok(Some(t.clone()))
+            } else if topo.prop(t).is_some() {
+                Err(KernelError::action(format!(
+                    "target 是落脚点，不用于道具；道具 id {t:?} 应放在 prop_id，与 intent 同级"
+                )))
             } else {
                 Err(KernelError::action(format!("落脚点 {t:?} 不在封闭集合")))
             }

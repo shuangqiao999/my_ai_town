@@ -808,3 +808,58 @@ fn meal_actions_say_whether_they_can_start_now() {
         .unwrap();
     assert_eq!(eat["available"], true, "中午十二点应该能吃饭");
 }
+
+#[test]
+fn a_failed_prop_action_resends_visible_props() {
+    let mut w = world();
+    w.enable_agent("r1").unwrap();
+    let mut r = runtime(&mut w, spacious());
+    let q = life_request(&mut r, &mut w);
+    assert!(observed(&q).get("visible_props").is_some());
+    reply(
+        &mut r,
+        &mut w,
+        &q,
+        "run_actions",
+        json!({"actions":[{"intent":{"verb":"阅读公告"}}]}),
+    );
+    let q = life_request(&mut r, &mut w);
+    assert!(
+        observed(&q).get("visible_props").is_some(),
+        "道具提交失败后应重新带出当前道具 id"
+    );
+}
+
+#[test]
+fn three_failed_action_rounds_postpone_before_retrying_the_same_format() {
+    let mut w = world();
+    w.enable_agent("r1").unwrap();
+    let mut r = runtime(&mut w, spacious());
+    let q = life_request(&mut r, &mut w);
+    reply(
+        &mut r,
+        &mut w,
+        &q,
+        "run_actions",
+        json!({"actions":[{"intent":{"verb":"阅读公告"}}]}),
+    );
+    let q = life_request(&mut r, &mut w);
+    reply(
+        &mut r,
+        &mut w,
+        &q,
+        "run_actions",
+        json!({"actions":[{"intent":{"verb":"阅读公告"},"prop_id":"missing"}]}),
+    );
+    let q = life_request(&mut r, &mut w);
+    reply(
+        &mut r,
+        &mut w,
+        &q,
+        "run_actions",
+        json!({"actions":[{"intent":{"verb":"阅读公告"},"prop_id":"bench"}]}),
+    );
+    let s = r.session("r1").unwrap();
+    assert!(s.sleep().is_some(), "连续三次动作失败后应先搁置");
+    assert_eq!(s.streaks.action_failures, 0);
+}

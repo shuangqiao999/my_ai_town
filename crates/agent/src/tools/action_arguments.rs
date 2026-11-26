@@ -7,7 +7,7 @@ use serde_json::{json, Value};
 pub(super) fn decode(arguments: &Value) -> Result<Actions, ToolError> {
     normalize(arguments).and_then(|value| super::decode(&value)).map_err(|mut error| {
         error.message.push_str(
-            "；格式：{\"actions\":[{\"intent\":{\"verb\":\"前往\",\"locale\":\"地点ID\"}}]}。actions 是数组，intent 是对象；地点ID 须替换为已知地点的真实 id。",
+            "；格式：{\"actions\":[{\"intent\":{\"verb\":\"前往\",\"locale\":\"地点ID\"}}]}；道具动作：{\"actions\":[{\"intent\":{\"verb\":\"饮水\"},\"prop_id\":\"道具ID\"}]}，prop_id 与 intent 同级。actions 是数组，intent 是对象；地点ID 须替换为已知地点的真实 id，道具ID 须替换为 visible_props 里的 id。",
         );
         error
     })

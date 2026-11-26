@@ -146,8 +146,11 @@ impl ResidentRuntime {
                 .find_map(|r| r.reason.as_deref())
                 .unwrap_or("动作失败");
             self.note_failure(world, s, &call.arguments.to_string(), error);
+            s.shown.observation_digests.remove("visible_props");
+            self.note_action_failure(world, s);
         } else if group.status == GroupStatus::Succeeded {
             s.streaks.failures = Default::default();
+            s.streaks.action_failures = 0;
         }
         let value = json!({"ok":group.status==GroupStatus::Succeeded,"group":group});
         if reported_running {

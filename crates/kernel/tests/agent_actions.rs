@@ -37,6 +37,30 @@ fn go(locale: &str) -> ActionDraft {
 }
 
 #[test]
+fn prop_action_errors_point_to_the_right_field() {
+    let mut w = world();
+    let revision = w.actor("r1").unwrap().actions.revision;
+    let missing = w
+        .run_actions("r1", "missing", revision, &[action("阅读公告", None)])
+        .unwrap_err()
+        .to_string();
+    assert!(missing.contains("道具动作必须指定 prop_id"), "{missing}");
+    assert!(missing.contains("prop_id 与 intent 同级"), "{missing}");
+
+    let mut misplaced = action("阅读公告", None);
+    misplaced.intent.target = Some("board".into());
+    let misplaced = w
+        .run_actions("r1", "misplaced", revision, &[misplaced])
+        .unwrap_err()
+        .to_string();
+    assert!(misplaced.contains("target 是落脚点"), "{misplaced}");
+    assert!(
+        misplaced.contains("prop_id") && misplaced.contains("与 intent 同级"),
+        "{misplaced}"
+    );
+}
+
+#[test]
 fn whole_group_validation_does_not_install_a_valid_prefix() {
     let mut w = world();
     let revision = w.actor("r1").unwrap().actions.revision;

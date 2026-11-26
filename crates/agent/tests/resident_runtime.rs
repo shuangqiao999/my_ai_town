@@ -540,6 +540,7 @@ fn action_compatibility_rejects_ambiguous_or_invalid_commands_without_world_chan
         assert_eq!(error.kind, expected);
         if expected == InvalidArguments {
             assert!(error.message.contains(r#"{"actions":[{"intent":{"verb""#));
+            assert!(error.message.contains("道具动作") && error.message.contains("prop_id"));
         }
         assert_eq!(before, serde_json::to_value(w.snapshot()).unwrap());
     }

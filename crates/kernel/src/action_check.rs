@@ -258,10 +258,11 @@ pub(crate) fn action_spot_for<'a>(
     locale: &str,
     draft: &ActionDraft,
 ) -> Result<&'a Spot> {
-    let prop = draft
-        .prop_id
-        .as_deref()
-        .ok_or_else(|| KernelError::action("道具动作必须指定 prop_id"))?;
+    let prop = draft.prop_id.as_deref().ok_or_else(|| {
+        KernelError::action(
+            "道具动作必须指定 prop_id；prop_id 与 intent 同级，用本轮 visible_props 里的道具 id",
+        )
+    })?;
     if w.inventory.carried_by(prop, actor) {
         ensure!(
             draft.intent.target.is_none(),
