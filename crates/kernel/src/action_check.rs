@@ -211,7 +211,10 @@ pub(crate) fn check_start_conditions(w: &World, actor: &str, spot: &Spot) -> Res
         w.prop_occupants(&spot.prop)
             .iter()
             .all(|o| o == actor || (shared && reading_too(o))),
-        KernelError::action("道具正被其他村民使用")
+        KernelError::action(format!(
+            "道具 {} 正被其他村民使用；换同类或换地点",
+            spot.prop
+        ))
     );
     Ok(())
 }
@@ -276,17 +279,22 @@ pub(crate) fn action_spot_for<'a>(
         return w
             .affordances
             .for_prop(prop, &draft.intent.verb)
-            .ok_or_else(|| KernelError::action("该物品不支持此动作"));
+            .ok_or_else(|| {
+                KernelError::action(format!("物品 {prop:?} 不支持这个动作；看它的 verbs 列表"))
+            });
     }
-    let definition = w
-        .topo
-        .prop(prop)
-        .ok_or_else(|| KernelError::action("道具不存在"))?;
+    let definition = w.topo.prop(prop).ok_or_else(|| {
+        KernelError::action(format!(
+            "道具 {prop:?} 不存在；从本轮 visible_props 重新取 id"
+        ))
+    })?;
     ensure!(
         !definition.withdrawn && w.inventory.on_map_at(&w.props, definition, locale),
-        KernelError::action("道具不在动作执行处所")
+        KernelError::action(format!("道具 {prop:?} 不在动作执行处所；先观察这里有什么"))
     );
     w.affordances
         .for_prop(prop, &draft.intent.verb)
-        .ok_or_else(|| KernelError::action("该道具不支持这个动作"))
+        .ok_or_else(|| {
+            KernelError::action(format!("道具 {prop:?} 不支持这个动作；看它的 verbs 列表"))
+        })
 }

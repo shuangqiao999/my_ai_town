@@ -193,6 +193,9 @@ pub struct Streaks {
     /// 连续动作提交失败次数；成功提交或重新醒来清零。只在内存里。
     #[serde(skip)]
     pub action_failures: u32,
+    /// 最近一次观察的处境摘要；换地点、换道具、新事件或新提示时重置失败计数。
+    #[serde(skip)]
+    pub situation: Option<u64>,
     /// 生活轮次模型请求失败后，最早再发请求的现实时刻（unix 秒）。只在内存里：重启后直接重试。
     #[serde(skip)]
     pub retry_at: u64,
@@ -568,12 +571,25 @@ impl Session {
     pub(crate) fn postpone(&mut self, sleep: Sleep) {
         self.wake.sleep = Some(sleep);
     }
-    /// 等待结束或世界变化：清掉睡眠并重新计一次唤醒。
+    /// 本轮观察的处境变了（换地点、换道具、新事件或新提示）：失败计数重新开始。
+    pub(crate) fn note_situation(&mut self, digest: u64) {
+        if self
+            .streaks
+            .situation
+            .is_some_and(|previous| previous != digest)
+        {
+            self.streaks.action_failures = 0;
+            self.streaks.failures = Default::default();
+        }
+        self.streaks.situation = Some(digest);
+    }
+    /// 等待结束或世界变化导致醒来：清掉本次醒来的计数。
     pub(crate) fn wake_up(&mut self) {
         self.wake.sleep = None;
         self.wake.wake_calls = 0;
         self.streaks.no_action = 0;
         self.streaks.action_failures = 0;
+        self.streaks.failures = Default::default();
         self.streaks.nudge = None;
     }
     /// 安排被外部改变（接管、交还、世界设定变化）：结束等待、重新计唤醒，精确计数作废。

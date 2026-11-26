@@ -274,6 +274,7 @@ impl ResidentRuntime {
         s: &mut Session,
         observation: &Value,
     ) -> Result<(Message, Value), AgentError> {
+        s.note_situation(situation_digest(observation));
         let mut body = serde_json::Map::new();
         body.insert(
             "observation".into(),
@@ -353,7 +354,26 @@ impl ResidentRuntime {
     }
 }
 
-/// 慢变字段和本段会话上次发出的相同时省略，来源引用一并省略；和交谈轮次一样只发变化。
+/// 失败计数只跟处境走：地点、眼前道具、背包、人物、补给提示或事件变了，就重新开始。
+fn situation_digest(observation: &Value) -> u64 {
+    let parts: Vec<String> = [
+        "locale",
+        "current",
+        "visible_props",
+        "inventory",
+        "people_here",
+        "survival_hints",
+        "treatment_hints",
+        "event_cursor",
+    ]
+    .into_iter()
+    .map(|key| observation[key].to_string())
+    .collect();
+    let refs: Vec<&str> = parts.iter().map(String::as_str).collect();
+    digest(&refs)
+}
+
+/// 慢变字段和本次会话上次发送时相同就省略；来源字段一起省略，和交谈轮次一样只报变化。
 fn omit_unchanged(s: &Session, observation: &Value) -> Value {
     let mut view = observation.clone();
     for key in super::SLOW_OBSERVATION_FIELDS {

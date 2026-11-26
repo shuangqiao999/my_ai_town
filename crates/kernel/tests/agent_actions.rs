@@ -58,6 +58,30 @@ fn prop_action_errors_point_to_the_right_field() {
         misplaced.contains("prop_id") && misplaced.contains("与 intent 同级"),
         "{misplaced}"
     );
+
+    let missing_prop = w
+        .run_actions(
+            "r1",
+            "missing-prop",
+            revision,
+            &[action("阅读公告", Some("never-placed"))],
+        )
+        .unwrap_err()
+        .to_string();
+    assert!(missing_prop.contains("never-placed"), "{missing_prop}");
+    assert!(missing_prop.contains("visible_props"), "{missing_prop}");
+
+    let unsupported = w
+        .run_actions(
+            "r1",
+            "unsupported",
+            revision,
+            &[action("制作器物", Some("board"))],
+        )
+        .unwrap_err()
+        .to_string();
+    assert!(unsupported.contains("board"), "{unsupported}");
+    assert!(unsupported.contains("verbs"), "{unsupported}");
 }
 
 #[test]

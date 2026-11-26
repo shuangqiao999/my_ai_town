@@ -863,3 +863,35 @@ fn three_failed_action_rounds_postpone_before_retrying_the_same_format() {
     assert!(s.sleep().is_some(), "连续三次动作失败后应先搁置");
     assert_eq!(s.streaks.action_failures, 0);
 }
+
+#[test]
+fn a_changed_place_clears_the_action_failure_streak() {
+    let mut w = world();
+    w.enable_agent("r1").unwrap();
+    let mut r = runtime(&mut w, spacious());
+    let q = life_request(&mut r, &mut w);
+    reply(
+        &mut r,
+        &mut w,
+        &q,
+        "run_actions",
+        json!({"actions":[{"intent":{"verb":"阅读公告"}}]}),
+    );
+    assert_eq!(r.session("r1").unwrap().streaks.action_failures, 1);
+
+    let revision = w.actor("r1").unwrap().actions.revision;
+    let move_draft: Vec<protocol::ActionDraft> = serde_json::from_value(json!([
+        {"intent":{"verb":"前往","locale":"loc_b"}}
+    ]))
+    .unwrap();
+    w.run_actions("r1", "move-after-failure", revision, &move_draft)
+        .unwrap();
+    while w.action_group("r1", "move-after-failure").unwrap().status
+        == protocol::GroupStatus::Running
+    {
+        w.step(1.0);
+    }
+
+    let _q = life_request(&mut r, &mut w);
+    assert_eq!(r.session("r1").unwrap().streaks.action_failures, 0);
+}
