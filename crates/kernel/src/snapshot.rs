@@ -426,9 +426,13 @@ impl WorldSnapshot {
                         .and_then(|p| p.definition.actions.iter().find(|a| a.id == action_id))
                 });
             ensure!(
-                action
-                    .and_then(|a| a.supply.as_ref())
-                    .is_some_and(|s| *remaining <= s.initial),
+                action.and_then(|a| a.supply.as_ref()).is_some_and(|s| {
+                    let cap = s
+                        .restock
+                        .as_ref()
+                        .map_or(s.initial, |r| r.max.max(s.initial));
+                    *remaining <= cap
+                }),
                 KernelError::snapshot("资源剩余状态无效")
             );
         }

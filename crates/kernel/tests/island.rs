@@ -90,7 +90,7 @@ fn gathering_and_building_consume_requirements_restock_at_dawn_and_survive_reloa
         "drift",
         json!({"id":"test:drift","version":1,"name":"漂流木堆","actions":[{
             "id":"gather","label":"捡木头","duration_minutes":10,"completion":"activity",
-            "supply":{"initial":2,"cost":1,"restock":{"amount":1,"max":2}},
+            "supply":{"initial":2,"cost":1,"restock":{"amount":1,"max":3}},
             "on_complete":[{"kind":"give_item","item":wood,"count":1}]
         }]}),
     );
@@ -145,7 +145,10 @@ fn gathering_and_building_consume_requirements_restock_at_dawn_and_survive_reloa
     assert!(back.topo.prop(&shelter).is_some_and(|p| p.shelter));
     back.step(1440.0);
     back.step(1440.0);
-    assert_eq!(drift(&back), 2);
+    assert_eq!(drift(&back), 3, "补货可以超过初始量，但不超过上限");
+    let fresh = common::world_with(common::two_places(json!([])), 420.0, &[]);
+    let reloaded = common::restore(&back, fresh);
+    assert_eq!(drift(&reloaded), 3);
 }
 
 #[test]
