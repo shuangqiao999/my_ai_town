@@ -63,7 +63,7 @@ pub mod world;
 
 pub use error::KernelError;
 pub use journal::{Journal, Thought};
-pub use needs::default_tuning;
+pub use needs::{default_tuning, legacy_default_tuning};
 pub use snapshot::{WorldCheckpoint, WorldSnapshot};
 pub use topology::Topology;
 pub use world::{Event, World};

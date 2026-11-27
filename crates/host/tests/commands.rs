@@ -416,12 +416,12 @@ fn observer_sets_body_only_while_paused_and_the_resident_just_feels_hungry() {
     assert_eq!(dead["ok"], false, "{dead}");
     let saved = reply(
         &mut ws,
-        adjust("hungry", json!({"fullness":30,"energy":60})),
+        adjust("hungry", json!({"fullness":20,"energy":60})),
         "agent_saved",
     );
     assert_eq!(saved["ok"], true, "{saved}");
     assert_eq!(saved["request_id"], "hungry");
-    assert!(saved["message"].as_str().unwrap().contains("饱腹 75 → 30"));
+    assert!(saved["message"].as_str().unwrap().contains("饱腹 75 → 20"));
     let roster = until(&mut ws, |m| {
         m["type"] == "roster"
             && members(m).iter().any(|r| {
@@ -430,7 +430,7 @@ fn observer_sets_body_only_while_paused_and_the_resident_just_feels_hungry() {
                         .as_array()
                         .unwrap()
                         .iter()
-                        .any(|n| n["kind"] == "fullness" && n["value"] == 30.0)
+                        .any(|n| n["kind"] == "fullness" && n["value"] == 20.0)
             })
     });
     let me = members(&roster)
@@ -445,7 +445,7 @@ fn observer_sets_body_only_while_paused_and_the_resident_just_feels_hungry() {
         .unwrap()
         .clone();
     assert_eq!(fullness["band"], "urgent", "{fullness}");
-    let save = town.saved(|v| v["world"]["actors"][&id]["needs"]["fullness"]["value"] == 30.0);
+    let save = town.saved(|v| v["world"]["actors"][&id]["needs"]["fullness"]["value"] == 20.0);
     let actor = save["world"]["actors"][&id].to_string();
     assert!(actor.contains("饱腹降低，需要关注身体状态"), "{actor}");
     for hidden in ["观察者", "调整", "受控实验"] {

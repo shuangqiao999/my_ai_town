@@ -13,6 +13,7 @@ mod possession;
 mod recording;
 mod resident_files;
 mod resident_host;
+mod survival;
 mod world_settings;
 
 mod weather;

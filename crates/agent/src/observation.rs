@@ -78,7 +78,7 @@ fn instant_restore(effect: &InstantEffect, need: Need) -> f64 {
 }
 
 /// 一次动作能补多少：过程恢复按每分钟速率乘时长，完成时恢复直接相加。
-fn restore_points(spot: &kernel::affordance::Spot, need: Need) -> f64 {
+fn restore_points(spot: &kernel::affordance::Spot, need: Need, restore_scale: f64) -> f64 {
     let rate = match need {
         Need::Water => spot.water_rate,
         Need::Fullness => spot.fullness_rate,
@@ -93,7 +93,12 @@ fn restore_points(spot: &kernel::affordance::Spot, need: Need) -> f64 {
             .map(|effect| instant_restore(effect, need))
             .sum()
     });
-    during + on_complete
+    let scale = if matches!(need, Need::Water | Need::Fullness) {
+        restore_scale
+    } else {
+        1.0
+    };
+    (during + on_complete) * scale
 }
 
 /// 动作的起始条件此刻是否满足。
@@ -203,7 +208,7 @@ fn known_supplies(world: &World, actor: &str, a: &kernel::world::Actor) -> Vec<S
                     SupplyKind::Health => None,
                 };
                 let gain = need.and_then(|need| {
-                    let points = restore_points(spot, need);
+                    let points = restore_points(spot, need, a.needs.tuning.restore_scale);
                     (points > 0.0).then(|| points.round() as u32)
                 });
                 let (take_action, portion) = spot

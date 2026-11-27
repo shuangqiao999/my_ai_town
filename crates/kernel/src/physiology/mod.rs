@@ -12,7 +12,6 @@ use crate::{
     World,
 };
 use protocol::{BodyCondition, BodyConditionKind as C, NeedsTuning, PhysiologySwitches};
-pub const WATER_DECAY: f64 = 0.075;
 /// 持续低值多少分钟后开始损害健康；下标与 `EXPOSURE_NEEDS` 同序。
 pub const GRACE: [f64; 3] = [120.0, 60.0, 90.0];
 pub const DAMAGE: [f64; 3] = [0.08, 0.16, 0.06];
@@ -122,11 +121,17 @@ impl Needs {
         if self.body.dead {
             return Rates::default();
         }
+        let sleeping = spot.is_some_and(|s| {
+            s.action
+                .as_ref()
+                .is_some_and(|a| a.completion == Completion::Sleep)
+        });
+        let decay = if sleeping { 0.5 } else { 1.0 };
         let mut r = Rates {
             values: NeedValues {
-                fullness: -self.tuning.fullness_decay,
+                fullness: -self.tuning.fullness_decay * decay,
                 energy: -self.tuning.energy_decay,
-                water: -WATER_DECAY,
+                water: -self.tuning.water_decay * decay,
                 health: 0.0,
             },
             exposure: [0.0; 3],
@@ -171,6 +176,11 @@ impl Needs {
             (Need::Water, s.water_rate, s.pause_water_decay),
             (Need::Health, s.health_rate, false),
         ] {
+            let rate = if matches!(need, Need::Water | Need::Fullness) {
+                rate * self.tuning.restore_scale
+            } else {
+                rate
+            };
             if rate > 0.0 {
                 r.values[need] = if pause { rate } else { r.values[need] + rate };
                 if !self.on(need) {

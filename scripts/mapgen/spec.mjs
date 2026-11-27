@@ -39,6 +39,7 @@ export function validateSpec(value, templates) {
     'resources',
     'terrain_source',
     'settlement',
+    'survival',
   ]
   if (Object.keys(value).some((k) => !allowed.includes(k))) throw Error('地图要求包含不支持的字段')
   const spec = structuredClone(value)
@@ -65,6 +66,8 @@ export function validateSpec(value, templates) {
   } else if (spec.schema_version !== undefined || spec.style_id !== 'svg-town-v1')
     throw Error('不支持的生成版本')
   if (!resources.includes(spec.resources)) throw Error('不支持的资源组合')
+  if (spec.survival !== undefined && !['abundant', 'scarce'].includes(spec.survival))
+    throw Error('生存节奏只能是 abundant 或 scarce')
   if (spec.settlement !== undefined && !settlements.includes(spec.settlement))
     throw Error('地点之间的连法只能是街道、野外小径或环岛小径')
   if (!Array.isArray(spec.places) || spec.places.length > templates.length * sizes.length)

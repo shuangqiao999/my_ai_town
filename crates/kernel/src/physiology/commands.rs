@@ -518,7 +518,12 @@ impl World {
         for e in effects {
             match e {
                 InstantEffect::Restore { need, amount } => {
-                    let gained = self.actor_mut(target).needs.restore(*need, *amount);
+                    let scale = if matches!(*need, Need::Water | Need::Fullness) {
+                        self.actors[target].needs.tuning.restore_scale
+                    } else {
+                        1.0
+                    };
+                    let gained = self.actor_mut(target).needs.restore(*need, *amount * scale);
                     changes.push(crate::outcome::restored(&name, *need, gained));
                 }
                 // 健康机制关闭时，状况既不新增也不解除。

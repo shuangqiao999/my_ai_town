@@ -297,15 +297,15 @@ fn service_uses_one_prop_and_only_diners_gain_fullness() {
         w.action_group("r3", "competing").unwrap().status,
         protocol::GroupStatus::Failed
     );
-    assert!((w.actor("r2").unwrap().needs.fullness.value - 62.0).abs() < 1e-6);
-    assert!((w.actor("r1").unwrap().needs.fullness.value - 74.5).abs() < 1e-6);
+    assert!((w.actor("r2").unwrap().needs.fullness.value - 62.1).abs() < 1e-6);
+    assert!((w.actor("r1").unwrap().needs.fullness.value - 74.6).abs() < 1e-6);
     w = restore(&w);
     w.step(10.0);
     assert_eq!(
         w.interactions().of("r1", "meal").unwrap().status,
         Status::Succeeded
     );
-    assert!((w.actor("r2").unwrap().needs.fullness.value - 74.0).abs() < 1e-6);
+    assert!((w.actor("r2").unwrap().needs.fullness.value - 74.2).abs() < 1e-6);
     assert!(w.prop_occupants("food").is_empty());
 }
 

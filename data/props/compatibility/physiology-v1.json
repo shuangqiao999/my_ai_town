@@ -26,5 +26,40 @@
     "previous": "b4cf82c9357d9df8",
     "current": "physiology-v1:479a3501c7ff1633",
     "legacy_prefix_hash": "6e569f5b8a9bddb5"
+  },
+  {
+    "map": "2d-town",
+    "previous": "physiology-v1:69bad49bfc03efd2",
+    "current": "physiology-v1:04d8909b596e55d6"
+  },
+  {
+    "map": "spring-valley",
+    "previous": "physiology-v1:c2d39e6cab2269dd",
+    "current": "physiology-v1:56ce64735413bc85"
+  },
+  {
+    "map": "broken-towers",
+    "previous": "physiology-v1:c31e7695664b587e",
+    "current": "physiology-v1:61003c4d715bf6fd"
+  },
+  {
+    "map": "prefab-battle-royale",
+    "previous": "physiology-v1:67c669d7fce1d35a",
+    "current": "physiology-v1:1ac7b4cb0202834e"
+  },
+  {
+    "map": "prefab-frostlight",
+    "previous": "physiology-v1:03f9c0ed24bbf591",
+    "current": "physiology-v1:6c1cf4ccd9da99ae"
+  },
+  {
+    "map": "prefab-swordholder",
+    "previous": "physiology-v1:1c6014047e24cff3",
+    "current": "physiology-v1:c5306c63e3e53619"
+  },
+  {
+    "map": "prefab-werewolf",
+    "previous": "physiology-v1:e70da7e36a6e3ff0",
+    "current": "physiology-v1:302995c971af1db6"
   }
 ]

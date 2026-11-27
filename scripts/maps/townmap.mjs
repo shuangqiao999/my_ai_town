@@ -302,7 +302,8 @@ function contentsOf(source, locale) {
 /**
  * source 是搬内景和户外道具的那份地图文档。roads 是「小镇道路」这处地点的编号：路口和房门外都算在它里面。
  * script 是生成这张图的脚本（记在拓扑的 source 里）；environment 是地图风格、worldview 是随图带的世界观（见文件头）；
- * entry 是新来的人落在哪（{ locale, station }），meals 是三餐，不给都照 source
+ * survival 是生存节奏（abundant 或 scarce，不写是 abundant）；entry 是化身出生点（{ locale, station }），
+ * meals 是三餐（菜单见设计脚本）。
  */
 export function townMap({
   id,
@@ -315,6 +316,7 @@ export function townMap({
   script = 'scripts/maps/default-town.mjs',
   environment,
   worldview,
+  survival,
   entry,
   meals,
 }) {
@@ -475,6 +477,7 @@ export function townMap({
         script,
         environment,
         worldview,
+        survival,
         entry,
         meals,
         island,
@@ -905,6 +908,7 @@ function assemble(m) {
     style_version: 1,
     ...(m.environment ? { environment: m.environment } : {}),
     ...(m.worldview ? { worldview: m.worldview } : {}),
+    ...(m.survival ? { survival: m.survival } : {}),
     topology,
     layout,
   }

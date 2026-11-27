@@ -200,7 +200,7 @@
     "id": "core:coffee_machine",
     "version": 1,
     "name": "咖啡机",
-    "description": "",
+    "description": "提神为主，补水有限。",
     "actions": [
       {
         "id": "action_0ae1669a",
@@ -1321,7 +1321,7 @@
           {
             "kind": "restore",
             "need": "fullness",
-            "amount": 50.0
+            "amount": 90.0
           }
         ],
         "portion_name": "一份饭",
@@ -1337,7 +1337,7 @@
     "id": "core:coffee_machine",
     "version": 2,
     "name": "咖啡机",
-    "description": "",
+    "description": "提神为主，补水有限。",
     "actions": [
       {
         "id": "action_0ae1669a",
@@ -1355,7 +1355,7 @@
           {
             "kind": "restore",
             "need": "water",
-            "amount": 10
+            "amount": 15
           }
         ],
         "portion_name": "一杯咖啡",
@@ -1407,7 +1407,7 @@
           {
             "kind": "restore",
             "need": "fullness",
-            "amount": 25.0
+            "amount": 40.0
           }
         ],
         "portion_name": "一份点心",
@@ -1460,7 +1460,7 @@
           {
             "kind": "restore",
             "need": "fullness",
-            "amount": 25.0
+            "amount": 40.0
           }
         ],
         "portion_name": "一份干粮",
@@ -1476,12 +1476,12 @@
     "id": "core:drinking_water",
     "version": 1,
     "name": "饮用水桶",
-    "description": "可饮用的清水；一份补充 45 点水分，可帮助在场村民补水。",
+    "description": "可饮用的清水；一份补 90 点水分，可帮助在场村民补水。",
     "actions": [
       {
         "id": "drink",
         "label": "饮水",
-        "duration_minutes": 3,
+        "duration_minutes": 5,
         "during": [],
         "completion": "activity",
         "conditions": [],
@@ -1489,7 +1489,7 @@
           {
             "kind": "restore",
             "need": "water",
-            "amount": 45
+            "amount": 90
           }
         ],
         "recipient": true,
@@ -3321,7 +3321,7 @@
           {
             "kind": "restore",
             "need": "water",
-            "amount": 20
+            "amount": 25
           },
           {
             "kind": "restore",

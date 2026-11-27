@@ -12,7 +12,6 @@ use host::{
     world_settings::{instructions_chars, INSTRUCTIONS_MAX_CHARS},
 };
 use kernel::{
-    default_tuning,
     population::{Admission, Entry},
     topology::EntryPoint,
 };
@@ -556,7 +555,7 @@ impl Runtime {
             })
             .map_err(|e| JoinError::Rejected(e.to_string()))?;
         self.world
-            .tune_needs(&plan.id, default_tuning())
+            .tune_needs(&plan.id, self.world.default_tuning())
             .map_err(|e| JoinError::Failed(format!("设置需求参数失败：{e}")))?;
         let common = self.world_settings.worldview.clone();
         self.driver
@@ -573,7 +572,7 @@ impl Runtime {
             persona: plan.persona.clone(),
             appearance: plan.template.fields.appearance.clone(),
             model_binding: req.model.clone(),
-            needs: default_tuning(),
+            needs: self.world.default_tuning(),
             order: 0,
         });
         let outcome = JoinOutcome {

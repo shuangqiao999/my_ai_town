@@ -5,8 +5,10 @@ use host::{
     world_settings::{instructions_chars, valid_speed, INSTRUCTIONS_MAX_CHARS},
     HostError,
 };
-use kernel::{avatar::WalkMap, default_tuning, weather::WeatherRules, World};
-use protocol::NeedRules;
+use kernel::{
+    avatar::WalkMap, default_tuning, legacy_default_tuning, weather::WeatherRules, World,
+};
+use protocol::{NeedRules, NeedsTuning};
 use std::{path::PathBuf, sync::Arc, time::Duration};
 
 pub(crate) enum Mode {
@@ -131,6 +133,8 @@ pub(crate) struct WorldSetup {
     pub weather_rules: Option<WeatherRules>,
     /// 当前场景包的放置器。
     pub scene: host::maps::placement::ScenePlacer,
+    /// 新居民默认采用的需求参数，来自地图 survival。
+    pub default_tuning: NeedsTuning,
 }
 
 impl WorldSetup {
@@ -144,6 +148,7 @@ impl WorldSetup {
         let topo = host::maps::runtime_topology(&self.topology_json, catalog)
             .map_err(|e| HostError::Runtime(format!("地图拓扑无效：{e}")))?;
         let mut world = World::new(topo, START_MINUTES, self.need_rules.clone());
+        world.set_default_tuning(self.default_tuning);
         world.set_placer(Box::new(self.scene.clone()));
         world.walk_map = self.walk_map.clone();
         if let Some(rules) = &self.weather_rules {
@@ -153,9 +158,55 @@ impl WorldSetup {
     }
 }
 
+/// 地图的生存节奏：缺省 abundant；scarce 保留资源竞争，补给只恢复一部分。
+pub(crate) fn survival_tuning(name: &str) -> Result<NeedsTuning, HostError> {
+    match name {
+        "abundant" => Ok(default_tuning()),
+        "scarce" => Ok(NeedsTuning {
+            restore_scale: 0.4,
+            ..default_tuning()
+        }),
+        other => Err(HostError::Config(format!(
+            "地图 survival 只能是 abundant 或 scarce，收到 {other}"
+        ))),
+    }
+}
+
 /// 内置阿树模板与旧配置主村民的明确映射；只按旧 id，不按姓名猜。
 fn template_of(id: &str) -> Option<String> {
     (id == "resident_ashu").then(|| "builtin_ashu".to_string())
+}
+
+/// 旧默认节奏的存档迁移：只替换整组仍是旧默认值的居民，用户改过的值保留。
+pub(crate) fn migrate_needs_tuning(world: &mut World, population: &mut Population) {
+    let mut migrated = 0;
+    for id in world.actor_ids() {
+        let Some(actor) = world.actor(&id) else {
+            continue;
+        };
+        if actor.is_avatar() {
+            continue;
+        }
+        let t = actor.needs.tuning;
+        // 旧档没有 water_decay，反序列化后是新字段默认值 0.05；也兼容明确写入了旧水耗的存档。
+        let legacy = t == legacy_default_tuning()
+            || t == (NeedsTuning {
+                water_decay: 0.05,
+                ..legacy_default_tuning()
+            });
+        if legacy {
+            let tuning = world.default_tuning();
+            if world.tune_needs(&id, tuning).is_ok() {
+                migrated += 1;
+                if let Some(registration) = population.residents.get_mut(&id) {
+                    registration.needs = tuning;
+                }
+            }
+        }
+    }
+    if migrated > 0 {
+        println!("[host] 生存节奏迁移：{migrated} 位居民改用新默认参数");
+    }
 }
 
 /// 旧档迁移：世界人物已通过旧版校验并恢复，这里只补登记，设为原有居民。
@@ -190,7 +241,7 @@ pub(crate) fn migrate_population(
             model_binding: None,
             needs: world
                 .actor(&id)
-                .map_or_else(default_tuning, |a| a.needs.tuning),
+                .map_or_else(|| world.default_tuning(), |a| a.needs.tuning),
             order: 0,
         });
     }

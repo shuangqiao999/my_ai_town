@@ -212,6 +212,7 @@ export function exportDocument(plan, graph, library, contours, definitions) {
     name: plan.spec.name,
     description: `${plan.places.length} 处地点 · ${homes.length} 处住宅`,
     origin: 'generated',
+    survival: plan.spec.survival ?? 'abundant',
     generation: {
       spec: plan.spec,
       generator_version: GENERATOR_VERSION,

@@ -196,6 +196,7 @@ export const battleRoyale: Prefab = {
     },
     constraints: [],
     resources: 'normal-life',
+    survival: 'scarce',
     terrain_source: 'auto',
     settlement: 'ring',
   },

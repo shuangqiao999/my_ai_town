@@ -78,13 +78,30 @@ const START: NeedValues<f64> = NeedValues {
 
 pub fn default_tuning() -> NeedsTuning {
     NeedsTuning {
+        fullness_decay: 0.04,
+        water_decay: 0.05,
+        energy_decay: 0.025,
+        labor_rate: 0.04,
+        voiced: 50.0,
+        ring: 25.0,
+        ring_reset: 35.0,
+        collapse: 10.0,
+        restore_scale: 1.0,
+    }
+}
+
+/// 旧版默认节奏；存档迁移只替换仍然完全是这套值的居民。
+pub fn legacy_default_tuning() -> NeedsTuning {
+    NeedsTuning {
         fullness_decay: 0.05,
+        water_decay: 0.075,
         energy_decay: 0.025,
         labor_rate: 0.04,
         voiced: 60.0,
         ring: 35.0,
         ring_reset: 45.0,
         collapse: 15.0,
+        restore_scale: 1.0,
     }
 }
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]

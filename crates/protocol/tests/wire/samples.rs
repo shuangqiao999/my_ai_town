@@ -5,13 +5,15 @@ use serde_json::json;
 
 pub fn tuning() -> NeedsTuning {
     NeedsTuning {
-        fullness_decay: 0.05,
+        fullness_decay: 0.04,
+        water_decay: 0.05,
         energy_decay: 0.025,
         labor_rate: 0.04,
-        voiced: 60.0,
-        ring: 35.0,
-        ring_reset: 45.0,
-        collapse: 15.0,
+        voiced: 50.0,
+        ring: 25.0,
+        ring_reset: 35.0,
+        collapse: 10.0,
+        restore_scale: 1.0,
     }
 }
 

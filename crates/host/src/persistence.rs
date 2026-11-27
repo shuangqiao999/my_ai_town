@@ -476,7 +476,21 @@ impl SaveStore {
         files: &Residents,
         journal: &history::Manifest,
     ) -> Result<(), HostError> {
-        let dir = sidecar(&self.path, backup.suffix());
+        let mut dir = sidecar(&self.path, backup.suffix());
+        // 内容升级可能连续发生；保留每一份原档，不覆盖更早的备份。
+        if matches!(backup, Backup::Content) {
+            let target = dir.join(SAVE_FILE_NAME);
+            if target.exists()
+                && fs::read(&target)
+                    .map_err(|e| HostError::Save(format!("读取 {} 失败：{e}", target.display())))?
+                    != bytes
+            {
+                let stamp = std::time::SystemTime::now()
+                    .duration_since(std::time::UNIX_EPOCH)
+                    .map_or(0, |d| d.as_secs());
+                dir = sidecar(&self.path, &format!("{}-{stamp}", backup.suffix()));
+            }
+        }
         lock(&self.disk).residents.backup(&dir, bytes, files)?;
         history::backup(&self.path, &dir.join(SAVE_FILE_NAME), journal)?;
         if let Some(name) = backup.extra_file() {

@@ -895,3 +895,29 @@ fn a_changed_place_clears_the_action_failure_streak() {
     let _q = life_request(&mut r, &mut w);
     assert_eq!(r.session("r1").unwrap().streaks.action_failures, 0);
 }
+
+#[test]
+fn survival_hint_gain_follows_the_scarcity_scale() {
+    let mut w = world();
+    place_water(&mut w, "water_b", "loc_b");
+    w.tune_needs(
+        "r1",
+        protocol::NeedsTuning {
+            restore_scale: 0.4,
+            ..kernel::default_tuning()
+        },
+    )
+    .unwrap();
+    w.adjust_body("r1", thirst()).unwrap();
+    let mut r = runtime(&mut w, spacious());
+    let q = life_request(&mut r, &mut w);
+    let hints = observed(&q)["survival_hints"]
+        .as_array()
+        .cloned()
+        .unwrap_or_default();
+    let water = hints
+        .iter()
+        .find(|hint| hint["prop_id"] == "water_b")
+        .expect("要指向乙地的水桶");
+    assert_eq!(water["gain"], 14);
+}

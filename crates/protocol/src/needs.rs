@@ -60,6 +60,12 @@ pub struct NeedState {
 pub struct NeedsTuning {
     /// 饱腹基础衰减（点/分钟，全天生效）
     pub fullness_decay: f64,
+    /// 水分基础衰减（点/分钟，全天生效）。
+    #[serde(
+        default = "default_water_decay",
+        skip_serializing_if = "is_default_water_decay"
+    )]
+    pub water_decay: f64,
     /// 精力基础衰减（点/分钟，仅清醒时）
     pub energy_decay: f64,
     /// 劳作额外精力消耗（点/分钟，匀速，不按道具时长折算）
@@ -68,6 +74,25 @@ pub struct NeedsTuning {
     pub ring: f64,
     pub ring_reset: f64,
     pub collapse: f64,
+    /// 水和食物补给的缩放；1.0 补满，稀缺地图可低于 1。
+    #[serde(
+        default = "default_restore_scale",
+        skip_serializing_if = "is_default_restore_scale"
+    )]
+    pub restore_scale: f64,
+}
+
+fn default_water_decay() -> f64 {
+    0.05
+}
+fn default_restore_scale() -> f64 {
+    1.0
+}
+fn is_default_water_decay(value: &f64) -> bool {
+    *value == default_water_decay()
+}
+fn is_default_restore_scale(value: &f64) -> bool {
+    *value == default_restore_scale()
 }
 
 #[derive(Debug, Clone, Deserialize)]
@@ -138,24 +163,34 @@ impl NeedsTuning {
     pub fn validate(&self, rules: &NeedRules) -> Result<(), String> {
         let values = [
             self.fullness_decay,
+            self.water_decay,
             self.energy_decay,
             self.labor_rate,
             self.voiced,
             self.ring,
             self.ring_reset,
             self.collapse,
+            self.restore_scale,
         ];
         if values.iter().any(|value| !value.is_finite()) {
             return Err("参数必须是有限数值".into());
         }
-        if [self.fullness_decay, self.energy_decay, self.labor_rate]
-            .iter()
-            .any(|value| !(rules.rate_min..=rules.rate_max).contains(value))
+        if [
+            self.fullness_decay,
+            self.water_decay,
+            self.energy_decay,
+            self.labor_rate,
+        ]
+        .iter()
+        .any(|value| !(rules.rate_min..=rules.rate_max).contains(value))
         {
             return Err(format!(
                 "衰减/劳作率须在 {}–{} 点/分钟",
                 rules.rate_min, rules.rate_max
             ));
+        }
+        if !(0.0..=1.0).contains(&self.restore_scale) {
+            return Err("补给缩放须在 0–1".into());
         }
         for rule in &rules.thresholds {
             let lower = rule.lower.value(self);

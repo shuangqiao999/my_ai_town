@@ -48,6 +48,7 @@ const town = townMap({
   roads: 'outdoor_road_01',
   script: 'scripts/maps/broken-towers.mjs',
   environment: { preset: 'wasteland' },
+  survival: 'scarce',
   worldview: WORLDVIEW,
   meals: [
     { name: '早饭', start: 360, end: 510, menu: '稀糊糊、压缩饼干和一碗热水' },

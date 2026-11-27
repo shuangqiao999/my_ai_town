@@ -98,12 +98,17 @@ fn load_map(
         .is_some()
         .then(|| load_weather_rules(&app.weather_rules_path))
         .transpose()?;
+    let survival = document
+        .get("survival")
+        .and_then(|v| v.as_str())
+        .unwrap_or("abundant");
     Ok(WorldSetup {
         topology_json,
         walk_map: walk_map.map(Arc::new),
         need_rules: host::config::load_need_rules(&app.needs_rules_path)?,
         weather_rules,
         scene: ScenePlacer::new(manifest.as_ref()),
+        default_tuning: startup::survival_tuning(survival)?,
     })
 }
 
@@ -186,7 +191,8 @@ fn build_runtime(
     host::maps::walk::restore_prop_positions(&mut world, args.save_file.as_deref())?;
     world.avatar_leave()?;
     // 新世界一律空村：没有种子村民，居民只能从村民库加入。
-    let population = saved.population.unwrap_or(fresh_population);
+    let mut population = saved.population.unwrap_or(fresh_population);
+    startup::migrate_needs_tuning(&mut world, &mut population);
     if world.walk_map.is_some() && world.weather().is_none() {
         return Err(HostError::Save("2D 世界存档缺少已启用的天气状态".into()));
     }

@@ -8,7 +8,7 @@ use crate::{
     interactions::Interactions, inventory::Inventory, navigation::space::Placer, props::Props,
     topology::Topology,
 };
-use protocol::{EventInfo, NeedRules, PhysiologySwitches};
+use protocol::{EventInfo, NeedRules, NeedsTuning, PhysiologySwitches};
 
 pub use crate::activity::{ActKind, Activity, TravelStage};
 pub use crate::actor::Actor;
@@ -34,6 +34,8 @@ pub struct World {
     /// 加载时注入的二维自由行走几何，不写入世界快照。
     pub walk_map: Option<std::sync::Arc<crate::avatar::WalkMap>>,
     pub topo: Topology,
+    /// 新加入居民默认采用的需求参数；由 host 按地图 survival 设置，不写入世界快照。
+    pub(crate) default_tuning: NeedsTuning,
     /// 可供性索引（由道具表派生，affordance.rs）
     pub affordances: Affordances,
     /// 道具实例的运行期状态：放置、墓碑、补给（props/state.rs）
@@ -75,6 +77,7 @@ impl World {
             contents: ContentState::from_topology(&topo),
             props: Props::from_topology(&topo),
             topo,
+            default_tuning: crate::needs::default_tuning(),
             inventory: Default::default(),
             interactions: Default::default(),
             minutes: start_minutes,
@@ -97,6 +100,13 @@ impl World {
         self.placer = Some(placer);
     }
 
+    /// 新居民默认需求参数（由地图 survival 配置注入）。
+    pub fn default_tuning(&self) -> NeedsTuning {
+        self.default_tuning
+    }
+    pub fn set_default_tuning(&mut self, tuning: NeedsTuning) {
+        self.default_tuning = tuning;
+    }
     pub fn minutes(&self) -> f64 {
         self.minutes
     }

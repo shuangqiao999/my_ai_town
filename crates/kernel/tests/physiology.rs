@@ -203,7 +203,7 @@ fn ignored_thirst_warning_wakes_the_sleeper_again_at_the_collapse_line() {
     let mut w = world();
     w.enable_agent("a").unwrap();
     // 已经低于第一次提醒线（那次放过去了），精力不满睡得着
-    set(&mut w, "a", [80.0, 40.0, 16.0, 100.0]);
+    set(&mut w, "a", [80.0, 40.0, 10.5, 100.0]);
     action(&mut w, "a", "nap", "bed", "睡觉", None);
     w.step(30.0);
     assert_eq!(
@@ -266,4 +266,106 @@ fn a_critical_neighbor_is_announced_to_people_in_the_same_place() {
             .any(|event| event.text.contains("健康危重")),
         "同地点的人应收到求助线索"
     );
+}
+
+#[test]
+fn drinking_fills_the_need_and_scarcity_scales_the_gain() {
+    let mut w = world();
+    let definition: kernel::props::Definition = serde_json::from_value(json!({
+        "id":"test:water90","version":1,"name":"满桶水",
+        "actions":[{"id":"drink","label":"饮水","duration_minutes":5,"completion":"activity",
+            "on_complete":[{"kind":"restore","need":"water","amount":90}],
+            "portion_name":"一壶水","supply":{"initial":200,"cost":1},"recipient":true}]
+    }))
+    .unwrap();
+    w.place_prop(
+        serde_json::from_value(json!({
+            "instance":{"id":"water90","definition":definition.reference(),"locale":"lab_room"},
+            "definition":definition
+        }))
+        .unwrap(),
+    )
+    .unwrap();
+    set(&mut w, "a", [90.0, 90.0, 50.0, 100.0]);
+    action(&mut w, "a", "drink", "water90", "饮水", None);
+    common::finish(&mut w, "a", "drink");
+    assert!(w.actor("a").unwrap().needs.water.value >= 90.0);
+
+    set(&mut w, "a", [90.0, 90.0, 50.0, 100.0]);
+    w.tune_needs(
+        "a",
+        protocol::NeedsTuning {
+            restore_scale: 0.4,
+            ..kernel::default_tuning()
+        },
+    )
+    .unwrap();
+    action(&mut w, "a", "scarcity", "water90", "饮水", None);
+    common::finish(&mut w, "a", "scarcity");
+    let water = w.actor("a").unwrap().needs.water.value;
+    assert!(
+        (water - 85.75).abs() < 1e-6,
+        "稀缺补给只恢复 36 点，扣掉动作耗时：{water}"
+    );
+
+    let slow: kernel::props::Definition = serde_json::from_value(json!({
+        "id":"test:slow-water","version":1,"name":"慢慢喝的水",
+        "actions":[{"id":"sip","label":"慢慢喝","duration_minutes":10,"completion":"activity",
+            "during":[{"kind":"restore_need","need":"water","per_minute":5,"pause_decay":true}]}]
+    }))
+    .unwrap();
+    w.place_prop(
+        serde_json::from_value(json!({
+            "instance":{"id":"slow_water","definition":slow.reference(),"locale":"lab_room"},
+            "definition":slow
+        }))
+        .unwrap(),
+    )
+    .unwrap();
+    set(&mut w, "a", [90.0, 90.0, 50.0, 100.0]);
+    action(&mut w, "a", "slow", "slow_water", "慢慢喝", None);
+    common::finish(&mut w, "a", "slow");
+    let water = w.actor("a").unwrap().needs.water.value;
+    assert!((water - 70.0).abs() < 1e-6, "过程补水也按稀缺比例：{water}");
+}
+
+#[test]
+fn sleep_halves_water_and_food_decay() {
+    let mut w = world();
+    set(&mut w, "a", [100.0, 100.0, 100.0, 100.0]);
+    action(&mut w, "a", "sleep", "bed", "睡觉", None);
+    w.step(60.0);
+    let a = &w.actor("a").unwrap().needs;
+    assert!(
+        (a.water.value - 98.5).abs() < 1e-6,
+        "睡眠水分 {}",
+        a.water.value
+    );
+    assert!(
+        (a.fullness.value - 98.8).abs() < 1e-6,
+        "睡眠饱腹 {}",
+        a.fullness.value
+    );
+}
+
+#[test]
+fn water_takes_about_a_day_to_reach_the_voiced_line() {
+    let mut w = world();
+    set(&mut w, "a", [100.0, 100.0, 100.0, 100.0]);
+    w.step(1000.0);
+    let water = w.actor("a").unwrap().needs.water.value;
+    assert!(
+        (water - 50.0).abs() < 1e-6,
+        "16.7 小时后应在 50 附近：{water}"
+    );
+    w.step(1.0);
+    let state = w
+        .actor("a")
+        .unwrap()
+        .needs
+        .states()
+        .into_iter()
+        .find(|state| state.kind == protocol::Need::Water)
+        .unwrap();
+    assert_eq!(state.band, protocol::NeedBand::Mild, "{state:?}");
 }
