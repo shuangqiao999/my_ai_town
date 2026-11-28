@@ -82,6 +82,13 @@ impl ResidentDriver {
                 &resident.id,
                 &instructions(&resident.persona, common),
             )?;
+            let enabled = mock.is_none()
+                && resident.model_binding.as_ref().is_some_and(|choice| {
+                    !choice.provider.is_empty()
+                        && choice.provider != host::builtin::PROVIDER
+                        && !choice.provider.starts_with("fixture")
+                });
+            runtime.set_action_reflection(&resident.id, enabled);
         }
         println!(
             "[host] 村民 Agent 已接入；轨迹日志在 {}（{}）",
@@ -279,6 +286,14 @@ impl ResidentDriver {
         credentials: &config::Credentials,
     ) {
         self.target = target(providers, credentials);
+    }
+    /// 行动前自省只在在线/本地 Qwen 上启用；内置模型和离线接线保持原行为。
+    pub fn action_reflection_supported(&self, provider: &str) -> bool {
+        // 离线接线夹具（tests/fixtures）走固定回复，不开自省；内置模型按训练题面也不开。
+        !self.mock
+            && !provider.is_empty()
+            && provider != host::builtin::PROVIDER
+            && !provider.starts_with("fixture")
     }
     pub fn flush_trace(&mut self) -> Result<(), HostError> {
         self.flush_trace_with_targets(&BTreeMap::new())

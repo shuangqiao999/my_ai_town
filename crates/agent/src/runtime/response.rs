@@ -123,6 +123,10 @@ impl ResidentRuntime {
             usage: env.reply.as_ref().ok().and_then(|r| r.usage),
         };
         self.settle_usage(world, s, &round, &env);
+        if round.kind == RequestKind::ActionReflection {
+            self.settle_action_reflection(world, s, &round, env.reply);
+            return true;
+        }
         if self.reject_outdated(world, s, &round) {
             return false;
         }
@@ -175,6 +179,117 @@ impl ResidentRuntime {
             "bytes_per_token": self.state.bytes_per_token
         });
         self.record(world, s, Trace::new("response", data).request(round.id));
+    }
+
+    /// 自省回复：确认或修正后执行；世界已变化、结果非法或模型失败时按安全规则回退。
+    fn settle_action_reflection(
+        &mut self,
+        world: &mut World,
+        s: &mut Session,
+        round: &RepliedRound,
+        reply: Result<ModelReply, ModelError>,
+    ) {
+        let Some(pending) = self.take_action_reflection(&s.actor_id) else {
+            self.ledger_close(round.id, RequestStatus::Failed, "缺少待反思草案");
+            self.record(
+                world,
+                s,
+                Trace::new("action_reflection_missing", json!({})).request(round.id),
+            );
+            return;
+        };
+        let reply = reply.and_then(|reply| {
+            reply.validate()?;
+            Ok(reply)
+        });
+        let resolution = self.resolve_action_reflection(&pending, reply, world.minutes(), round.id);
+        let (accepted, view, calls, thought, check_stamp) = match resolution {
+            super::action_reflection::Resolution::Accepted {
+                view,
+                calls,
+                thought,
+            } => (true, Some(view), calls, thought, round.stamp.clone()),
+            super::action_reflection::Resolution::Fallback {
+                view,
+                calls,
+                thought,
+            } => (false, view, calls, thought, pending.original_stamp.clone()),
+        };
+        if !still_current(world, &s.actor_id, &check_stamp) {
+            let cause = world
+                .actor(&s.actor_id)
+                .filter(|a| a.actions.revision != check_stamp.revision)
+                .map_or(OutdatedCause::Notice, |_| OutdatedCause::Revision);
+            s.restart_wake_count();
+            s.messages
+                .push(Message::text(Role::User, prompts::OUTDATED_BY_REVISION));
+            self.note_outdated(world, s, round, cause);
+            self.ledger_close(
+                round.id,
+                RequestStatus::Outdated,
+                "世界变化，自省后的草案未执行",
+            );
+            self.record(
+                world,
+                s,
+                Trace::new(
+                    "action_reflection_discarded",
+                    json!({"cause":cause.as_str(),"accepted":accepted}),
+                )
+                .request(round.id),
+            );
+            return;
+        }
+        if let Some(view) = view {
+            s.last_action_reflection = Some(view);
+        }
+        s.streaks.model_failures = 0;
+        s.input.rejections = 0;
+        s.cursors.acknowledged = s.cursors.acknowledged.max(check_stamp.seen_cursor);
+        let assistant = Message {
+            role: Role::Assistant,
+            content: thought.clone(),
+            calls: calls.clone(),
+            call_id: None,
+        };
+        s.messages.push(assistant);
+        let final_reply = ModelReply {
+            thought: thought.clone(),
+            calls: calls.clone(),
+            usage: None,
+        };
+        if !thought.trim().is_empty() {
+            note_thought(world, &s.actor_id, RequestKind::Life, &final_reply);
+        }
+        let exec_round = RepliedRound {
+            id: round.id,
+            stamp: round.stamp.clone(),
+            kind: RequestKind::Life,
+            sent_messages: s.messages.len(),
+            usage: round.usage,
+        };
+        let outcome = self.execute_calls(world, s, &exec_round, calls);
+        let status = if outcome.outdated {
+            RequestStatus::Outdated
+        } else {
+            RequestStatus::Adopted
+        };
+        let detail = if accepted {
+            format!("行动前自省采纳：{}", outcome.names)
+        } else {
+            format!("自省未采纳，执行原草案：{}", outcome.names)
+        };
+        self.ledger_close(round.id, status, detail);
+        self.finish_life_round(world, s, &exec_round, outcome.outdated);
+        self.record(
+            world,
+            s,
+            Trace::new(
+                "action_reflection",
+                json!({"accepted":accepted,"calls":outcome.names}),
+            )
+            .request(round.id),
+        );
     }
 
     /// 请求期间外部改了安排、村民失去受控或无法行动：整条回复作废。
@@ -250,8 +365,15 @@ impl ResidentRuntime {
         let format_retry = match round.kind {
             RequestKind::Life => s.is_format_retry(&reply),
             RequestKind::Chat => s.chat.attempts > 0,
-            RequestKind::Reflection => false,
+            RequestKind::Reflection | RequestKind::ActionReflection => false,
         };
+        if round.kind == RequestKind::Life
+            && !format_retry
+            && self.begin_action_reflection(world, s, &round.stamp, round.id, &reply)
+        {
+            self.ledger_close(round.id, RequestStatus::Adopted, "草案进入行动前自省");
+            return;
+        }
         let assistant = Message {
             role: Role::Assistant,
             content: reply.thought.clone(),
@@ -272,6 +394,7 @@ impl ResidentRuntime {
                     s.remember_known_prefix(prefix);
                 }
             }
+            RequestKind::ActionReflection => {}
         }
         if !format_retry {
             note_thought(world, &s.actor_id, round.kind, &reply);
@@ -296,7 +419,7 @@ impl ResidentRuntime {
         match round.kind {
             RequestKind::Life => self.finish_life_round(world, s, round, outcome.outdated),
             RequestKind::Chat => self.finish_chat_round(world, s, round, outcome.outdated),
-            RequestKind::Reflection => {}
+            RequestKind::Reflection | RequestKind::ActionReflection => {}
         }
     }
 
@@ -525,12 +648,23 @@ impl ResidentRuntime {
 
 /// 执行前退回的调用：本轮次不开放的工具，以及收到重要通知后改变世界的调用。
 /// 未知工具名不在这里处理，交给执行入口报错。
+/// 自省期间没有换人、失去控制或收到重要通知；地点/道具的普通变化仍由执行时校验。
+fn still_current(world: &World, actor: &str, stamp: &RequestStamp) -> bool {
+    world.actor(actor).is_some_and(|a| {
+        a.actions.revision == stamp.revision
+            && a.actions.agent_controlled
+            && !a.needs.incapacitated()
+            && !event_arrived(a, stamp.seen_cursor, None)
+    })
+}
+
 fn screen(kind: RequestKind, name: Option<ToolName>, important_new: bool) -> Option<ToolError> {
     if name.is_some_and(|n| !n.allowed_in(kind)) {
         let rule = match kind {
             RequestKind::Reflection => prompts::REFLECTION_TOOLS_ONLY,
             RequestKind::Chat => prompts::CHAT_TOOLS_ONLY,
             RequestKind::Life => prompts::LIFE_TOOLS_ONLY,
+            RequestKind::ActionReflection => prompts::LIFE_TOOLS_ONLY,
         };
         return Some(ToolError::new(ToolErrorKind::NotAllowed, rule));
     }

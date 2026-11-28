@@ -203,7 +203,9 @@ export type MemoryStatus = 'active' | 'candidate' | 'superseded'
 export type EvidenceSource = 'observed' | 'reported' | 'inferred'
 export type InteractionStatus =
   'offered' | 'running' | 'succeeded' | 'declined' | 'cancelled' | 'expired' | 'interrupted'
-export type RequestKind = 'life' | 'reflection' | 'chat'
+export type RequestKind = 'life' | 'reflection' | 'chat' | 'action_reflection'
+export type ReflectionGoalAlignment = 'high' | 'medium' | 'low'
+export type ReflectionRisk = 'none' | 'low' | 'medium' | 'high'
 export type RequestStatus =
   'in_flight' | 'adopted' | 'format_retry' | 'outdated' | 'failed' | 'dropped' | 'controlled'
 
@@ -269,6 +271,24 @@ export interface ResidentDetailView {
     replaces: number[]
     events: WorldFact[]
   }[]
+  /** 最近一次行动前自省；只在角色卡显示，不进公共事件流 */
+  reflection?: ActionReflectionView
+}
+
+export interface ActionReflectionView {
+  sim_minutes: number
+  clock: string
+  internal_thought: string
+  self_question: string
+  predicted_outcome: string
+  goal_alignment: ReflectionGoalAlignment
+  risk: ReflectionRisk
+  risk_note: string
+  alternative_considered: string
+  correction_needed: boolean
+  confidence: number
+  reason: string
+  memory_note: string
 }
 
 /** 小镇当前使用的服务商与模型 */

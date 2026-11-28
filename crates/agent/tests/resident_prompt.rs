@@ -228,6 +228,7 @@ impl Scene {
                 "wait_for",
                 json!({"event":"interaction","reason":"等人来找"}),
             ),
+            RequestKind::ActionReflection => ("submit_action_reflection", json!({})),
         };
         self.answer(q, vec![call]);
     }

@@ -296,6 +296,7 @@ impl ResidentRuntime {
                 .map(|i| interaction::summary(world, i))
                 .collect(),
             memories: memories.get(s, a),
+            reflection: s.last_action_reflection.clone(),
         })
     }
 }

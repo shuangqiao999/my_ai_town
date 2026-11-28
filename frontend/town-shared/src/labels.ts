@@ -42,6 +42,7 @@ export const requestKindLabels: Record<RequestKind, string> = {
   life: '生活决策',
   reflection: '记忆整理',
   chat: '交谈发言',
+  action_reflection: '行动反思',
 }
 
 export const requestStatusLabels: Record<RequestStatus, string> = {

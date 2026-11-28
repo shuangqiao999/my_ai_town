@@ -17,6 +17,16 @@ struct Reply {
     message: String,
 }
 
+pub(super) fn validate_offer(arguments: &Value) -> Result<(), ToolError> {
+    decode::<Offer>(arguments)?;
+    Ok(())
+}
+
+pub(super) fn validate_reply(arguments: &Value) -> Result<(), ToolError> {
+    decode::<Reply>(arguments)?;
+    Ok(())
+}
+
 pub(super) fn offer(ctx: &mut ToolContext, call: &ToolCall) -> Result<ToolOutcome, ToolError> {
     let mut args = call.arguments.clone();
     let partner = args["partner_id"].as_str().map(str::to_owned);

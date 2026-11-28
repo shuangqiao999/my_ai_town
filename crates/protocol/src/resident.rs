@@ -106,8 +106,10 @@ pub enum RequestKind {
     Life,
     #[serde(alias = "记忆整理")]
     Reflection,
-    /// 交谈中轮到本人发言：只带聊天规则、人设、摘要、目标和本场对话。
+    /// 轮到本人发言时的单次请求；只带交谈规则、摘要、目标和本轮对话。
     Chat,
+    /// 生活动作提交前的自省；确认或修正草案，不直接改变世界。
+    ActionReflection,
 }
 
 /// 请求结果。存档里旧的中文值可反序列化。
@@ -212,6 +214,44 @@ pub struct ResidentDetailView {
     pub results: Vec<ActionResultView>,
     pub interactions: Vec<ResidentInteractionView>,
     pub memories: Vec<ResidentMemoryView>,
+    /// 最近一次行动前自省；只给角色卡看，不进公共事件流。
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub reflection: Option<ActionReflectionView>,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum ReflectionGoalAlignment {
+    High,
+    Medium,
+    Low,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum ReflectionRisk {
+    None,
+    Low,
+    Medium,
+    High,
+}
+
+/// 一次行动前自省的可见部分。内部想法已经进日记，这里保留自问、预测和最终理由。
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct ActionReflectionView {
+    pub sim_minutes: f64,
+    pub clock: String,
+    pub internal_thought: String,
+    pub self_question: String,
+    pub predicted_outcome: String,
+    pub goal_alignment: ReflectionGoalAlignment,
+    pub risk: ReflectionRisk,
+    pub risk_note: String,
+    pub alternative_considered: String,
+    pub correction_needed: bool,
+    pub confidence: f64,
+    pub reason: String,
+    pub memory_note: String,
 }
 
 /// 村民在等什么：自己写的理由、最迟醒来的时刻，以及哪类事件来了会提前醒（只按时间等时没有）。

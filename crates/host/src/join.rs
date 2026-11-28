@@ -561,6 +561,12 @@ impl Runtime {
         self.driver
             .set_persona(&mut self.world, &plan.id, &plan.persona, &common)
             .map_err(|e| JoinError::Failed(format!("登记 Agent 会话失败：{e}")))?;
+        let provider = req
+            .model
+            .as_ref()
+            .map_or("", |choice| choice.provider.as_str());
+        let enabled = self.driver.action_reflection_supported(provider);
+        self.driver.runtime.set_action_reflection(&plan.id, enabled);
         let joined_at = self.world.minutes();
         self.population.insert(Registration {
             id: plan.id.clone(),

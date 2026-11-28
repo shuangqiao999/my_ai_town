@@ -83,6 +83,21 @@ impl WorkerPool {
 pub fn complete(target: &LlmTarget, request: &AgentRequest) -> Result<ModelReply, ModelError> {
     let local_qwen =
         target.provider == "ollama" && target.model.to_ascii_lowercase().starts_with("qwen3.5");
+    if request.stamp.kind == protocol::RequestKind::ActionReflection {
+        // 内置模型按生活题面训练，自省题面是分布外；能力开关本应挡住，这里再兜底。
+        if target.provider == crate::builtin::PROVIDER {
+            return Err(ModelError::NotSent("内置模型不接受行动前自省".into()));
+        }
+        if local_qwen {
+            let body = completion::local_action_reflection_request_body(request, &target.model);
+            let response = post_completion(target, &body)?;
+            return completion::parse_local_action_reflection(&response, request);
+        }
+        let mut body = completion::tool_request_body(request, &target.model);
+        body["temperature"] = json!(0.3);
+        let response = post_completion(target, &body)?;
+        return completion::parse_tool_reply(&response);
+    }
     let mut body = if local_qwen {
         completion::local_tool_request_body(request, &target.model)
     } else {
@@ -109,6 +124,52 @@ pub fn complete(target: &LlmTarget, request: &AgentRequest) -> Result<ModelReply
 
 /// 仅用于离线接线验收：看一次眼前道具，然后等待；不作为真实模型行为证据。
 fn mock_reply(request: &AgentRequest) -> ModelReply {
+    if request.stamp.kind == protocol::RequestKind::ActionReflection {
+        let body = request
+            .messages
+            .iter()
+            .rev()
+            .filter_map(|m| serde_json::from_str::<Value>(&m.content).ok())
+            .find(|v| v.get("draft").is_some())
+            .unwrap_or_default();
+        let calls: Vec<Value> = body["draft"]["calls"]
+            .as_array()
+            .into_iter()
+            .flatten()
+            .filter_map(|call| {
+                Some(json!({
+                    "action_id": call["name"].as_str()?,
+                    "action_params": call["arguments"].clone()
+                }))
+            })
+            .collect();
+        return ModelReply {
+            thought: String::new(),
+            calls: vec![agent::conversation::ToolCall {
+                id: format!("mock_self_review_{}", request.stamp.id),
+                name: "submit_action_reflection".into(),
+                arguments: json!({
+                    "internal_thought": body["draft"]["thought"].as_str().unwrap_or("先照原计划做。"),
+                    "reflection": {
+                        "self_question": "这一步和眼下的目标一致吗？",
+                        "predicted_outcome": "按草案继续推进。",
+                        "goal_alignment": "medium",
+                        "risk": "low",
+                        "risk_note": "离线接线只确认草案。",
+                        "alternative_considered": "无",
+                        "correction_needed": false
+                    },
+                    "decision": {
+                        "calls": calls,
+                        "confidence": 0.8,
+                        "reason": "离线接线确认草案。"
+                    },
+                    "memory_note": ""
+                }),
+            }],
+            usage: None,
+        };
+    }
     if let Some(task) = request
         .messages
         .iter()

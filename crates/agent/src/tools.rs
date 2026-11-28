@@ -75,6 +75,7 @@ impl ToolName {
             RequestKind::Life => self != Self::Reflect,
             RequestKind::Reflection => REFLECTION_TOOLS.contains(&self),
             RequestKind::Chat => self == Self::Interact,
+            RequestKind::ActionReflection => false,
         }
     }
     /// 改变世界的工具：请求期间收到重要通知时退回，要求先重新观察。
@@ -360,6 +361,71 @@ pub fn reflection_definitions(has_read: bool) -> Vec<Value> {
 
 /// 生活决策的工具。开着的玩法让这个人交选择时多一件 mode_action，说明由玩法写；
 /// 没开玩法时和 definitions(Life) 一字不差。
+pub fn action_reflection_definitions(world: &World, actor: &str) -> Vec<Value> {
+    let keep = [
+        ToolName::RunActions,
+        ToolName::Interact,
+        ToolName::OfferInvitation,
+        ToolName::ReplyInvitation,
+        ToolName::ModeAction,
+        ToolName::SetGoal,
+        ToolName::WaitFor,
+    ];
+    life_definitions(world, actor)
+        .into_iter()
+        .filter_map(|definition| {
+            let name = definition["function"]["name"].as_str()?;
+            let tool = keep.iter().find(|tool| tool.as_str() == name)?;
+            let (risk, cost) = match tool {
+                ToolName::RunActions => ("medium", "会消耗时间、体力，可能消耗眼前补给"),
+                ToolName::Interact => ("medium", "会改变交谈、同行或约定状态"),
+                ToolName::OfferInvitation => ("medium", "会把承诺或请求交到别人手上"),
+                ToolName::ReplyInvitation => ("medium", "会接受或拒绝别人的请求"),
+                ToolName::ModeAction => ("high", "会影响玩法局面，代价可能不可逆"),
+                ToolName::SetGoal | ToolName::WaitFor => ("low", "只记录计划或等待"),
+                _ => return None,
+            };
+            Some(json!({
+                "action_id": name,
+                "description": definition["function"]["description"],
+                "parameters": definition["function"]["parameters"],
+                "risk": risk,
+                "cost": cost
+            }))
+        })
+        .collect()
+}
+
+/// 不执行世界命令，只按工具自己的参数结构检查自省结果。动态前置条件仍由真正执行时校验。
+pub fn validate_reflection_arguments(name: &str, arguments: &Value) -> Result<(), ToolError> {
+    match name {
+        "run_actions" => {
+            action_arguments::decode(arguments)?;
+        }
+        "interact" => {
+            decode::<InteractionCommand>(arguments)?;
+        }
+        "offer_invitation" => invitations::validate_offer(arguments)?,
+        "reply_invitation" => invitations::validate_reply(arguments)?,
+        "mode_action" => {
+            decode::<protocol::GameModeAction>(arguments)?;
+        }
+        "set_goal" => {
+            decode::<goals::GoalUpdate>(arguments)?;
+        }
+        "wait_for" => {
+            decode::<Wait>(arguments)?;
+        }
+        other => {
+            return Err(ToolError::new(
+                ToolErrorKind::InvalidArguments,
+                format!("{other} 不是可反思的世界动作"),
+            ))
+        }
+    }
+    Ok(())
+}
+
 pub fn life_definitions(world: &World, actor: &str) -> Vec<Value> {
     let mut list = definitions(RequestKind::Life);
     if let Some(description) = world.game_mode_tool(actor) {

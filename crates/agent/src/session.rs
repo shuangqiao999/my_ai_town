@@ -11,6 +11,10 @@ use std::collections::{BTreeMap, BTreeSet};
 /// 提示词保留所有当前事务和最近这么多个已结束目标。
 pub const CLOSED_GOALS_IN_CONTEXT: usize = 4;
 
+fn action_reflection_default() -> bool {
+    false
+}
+
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(tag = "kind", rename_all = "snake_case", deny_unknown_fields)]
 pub enum GoalCondition {
@@ -343,6 +347,12 @@ pub struct Session {
     pub memory: crate::memory::MemoryStore,
     #[serde(default)]
     pub notebook: crate::notebook::Notebook,
+    /// 最近一次行动前自省；只给角色卡和下一次自省看，不进公共事件流。
+    #[serde(default)]
+    pub last_action_reflection: Option<protocol::ActionReflectionView>,
+    /// 当前模型能否做行动前自省；内置模型按训练题面关闭。
+    #[serde(default = "action_reflection_default")]
+    pub action_reflection: bool,
     #[serde(flatten)]
     wake: Wake,
     #[serde(flatten)]
@@ -377,6 +387,8 @@ impl Session {
             daily: Account::default(),
             memory: Default::default(),
             notebook: Default::default(),
+            last_action_reflection: None,
+            action_reflection: action_reflection_default(),
             wake: Default::default(),
             streaks: Default::default(),
             folded: Default::default(),
@@ -428,6 +440,8 @@ impl Session {
                 request: self.notebook.request.clone(),
                 reading_dialogue: self.notebook.reading_dialogue.clone(),
             },
+            last_action_reflection: self.last_action_reflection.clone(),
+            action_reflection: self.action_reflection,
             wake: self.wake.clone(),
             streaks: self.streaks.clone(),
             folded: Folded {

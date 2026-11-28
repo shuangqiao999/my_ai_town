@@ -1,4 +1,4 @@
-import type { ResidentAgentView, ResidentDetailView } from '../protocol'
+import type { ActionReflectionView, ResidentAgentView, ResidentDetailView } from '../protocol'
 import { el as text } from '../dom'
 import { clock, playerText } from '../format'
 import {
@@ -20,6 +20,29 @@ const resultStatusLabels = {
   failed: '失败',
   interrupted: '中断',
   cancelled: '取消',
+}
+
+const alignmentLabels = { high: '高', medium: '中', low: '低' }
+const riskLabels = { none: '无', low: '低', medium: '中', high: '高' }
+
+function reflectionSection(r: ActionReflectionView): HTMLElement[] {
+  const rows = [
+    text('h4', `刚才的自问 · ${r.clock}`),
+    text('p', `「${playerText(r.internal_thought)}」`),
+    text('p', `自问：${playerText(r.self_question)}`, 'dim'),
+    text('p', `预测：${playerText(r.predicted_outcome)}`, 'dim'),
+    text(
+      'p',
+      `目标对齐：${alignmentLabels[r.goal_alignment]} · 风险：${riskLabels[r.risk]}`,
+      'dim'
+    ),
+  ]
+  if (r.risk_note) rows.push(text('p', playerText(r.risk_note), 'dim'))
+  if (r.alternative_considered && r.alternative_considered !== '无')
+    rows.push(text('p', `考虑过：${playerText(r.alternative_considered)}`, 'dim'))
+  rows.push(text('p', `决定：${playerText(r.reason)}`, 'dim'))
+  if (r.memory_note) rows.push(text('p', `记下：${playerText(r.memory_note)}`, 'dim'))
+  return rows
 }
 
 /** 状态和原因；调用次数、token 这些在「消耗」页里 */
@@ -146,6 +169,7 @@ export function createAgentView(box: HTMLElement, recorded = false) {
       )
     )
     const fragment = document.createDocumentFragment()
+    if (view.reflection) fragment.append(...reflectionSection(view.reflection))
     fragment.append(
       ...section('持续目标', view.goals, '还没有记录目标', goalRow),
       ...section('最近动作结果', view.results, '还没有动作结果', resultRow)

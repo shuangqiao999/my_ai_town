@@ -117,6 +117,7 @@ fn detail_view() -> ResidentDetailView {
                 }),
             }],
         }],
+        reflection: None,
     }
 }
 

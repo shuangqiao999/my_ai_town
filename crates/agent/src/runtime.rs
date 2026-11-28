@@ -18,6 +18,7 @@ use std::{
     rc::Rc,
 };
 
+mod action_reflection;
 mod arrivals;
 mod chat;
 mod controlled;
@@ -227,6 +228,10 @@ pub struct ResidentRuntime {
     memory_views: BTreeMap<String, crate::view::MemoryViews>,
     /// 最近一次 poll 传入的现实时间（Unix 秒），写进台账。
     wall_clock: u64,
+    /// 等待自省回复的草案；只在内存里，重启后由现有在途请求清理丢弃。
+    pending_action_reflections: BTreeMap<String, action_reflection::PendingActionReflection>,
+    /// 已登记、下一次 poll 交给 host 的自省请求。
+    queued_action_reflections: Vec<AgentRequest>,
 }
 
 impl ResidentRuntime {
@@ -253,6 +258,8 @@ impl ResidentRuntime {
             documents: BTreeMap::new(),
             memory_views: BTreeMap::new(),
             wall_clock: 0,
+            pending_action_reflections: BTreeMap::new(),
+            queued_action_reflections: Vec::new(),
         })
     }
     pub fn state(&self) -> &RuntimeState {
@@ -260,6 +267,12 @@ impl ResidentRuntime {
     }
     pub fn session(&self, actor: &str) -> Option<&Session> {
         self.state.sessions.get(actor)
+    }
+    /// host 按居民当前模型设置是否允许行动前自省；内置模型和离线接线模式关闭。
+    pub fn set_action_reflection(&mut self, actor: &str, enabled: bool) {
+        if let Some(session) = self.state.sessions.get_mut(actor) {
+            session.action_reflection = enabled;
+        }
     }
     /// 一位村民的会话，连同他「记着的事」的缓存（view.rs 拼角色卡细节时两样一起要）。
     pub(crate) fn session_with_memory_views(
@@ -313,7 +326,11 @@ impl ResidentRuntime {
         unix_now: u64,
     ) -> Vec<AgentRequest> {
         self.wall_clock = unix_now;
-        let mut requests = Vec::new();
+        let mut requests = if running {
+            std::mem::take(&mut self.queued_action_reflections)
+        } else {
+            Vec::new()
+        };
         let mut actors: Vec<_> = self.state.sessions.keys().cloned().collect();
         if let Some(last) = &self.state.last_dispatched {
             let offset = actors.iter().position(|id| id > last).unwrap_or(0);

@@ -35,6 +35,7 @@ impl ResidentRuntime {
                     s.notebook.reading_dialogue.push(message);
                 }
             }
+            RequestKind::ActionReflection => {}
         }
         let data = json!({
             "call_id": result.call.id,

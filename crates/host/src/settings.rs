@@ -367,6 +367,7 @@ impl Runtime {
         resident: &str,
         model: ModelChoice,
     ) -> Outcome {
+        let provider = model.provider.clone();
         let result = self
             .population
             .find(Some(resident))
@@ -384,6 +385,10 @@ impl Runtime {
                 Ok(id)
             });
         // 人口视图里带着各人的模型，页面的「还没选模型」提示跟着变
+        if let Ok(id) = &result {
+            let enabled = self.driver.action_reflection_supported(&provider);
+            self.driver.runtime.set_action_reflection(id, enabled);
+        }
         let saved = result.is_ok();
         let outcome = self.agent_update(request_id, result, "使用模型已保存，下一次请求生效");
         if saved {

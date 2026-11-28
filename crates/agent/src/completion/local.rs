@@ -660,6 +660,9 @@ fn decision_state(request: &AgentRequest) -> Option<Value> {
 /// 所有轮次保留原工具能力，基础动作和聊天操作拆成精确分支；不发送原生 tools，
 /// 避免本地模板再次重排参数层级。每轮一个调用，批量身体动作仍放在 advanced_actions 中。
 pub fn local_tool_request_body(request: &AgentRequest, model: &str) -> Value {
+    if request.stamp.kind == protocol::RequestKind::ActionReflection {
+        return local_action_reflection_request_body(request, model);
+    }
     let tools = local_tools(request);
     let guide = guidance(request, &tools);
     let mut messages = wire_history(request);
@@ -703,6 +706,53 @@ pub fn local_tool_request_body(request: &AgentRequest, model: &str) -> Value {
             }
         }}
     })
+}
+
+pub fn local_action_reflection_request_body(request: &AgentRequest, model: &str) -> Value {
+    json!({
+        "model": model,
+        "max_tokens": request.max_output_tokens,
+        "messages": wire_history(request),
+        "response_format": {"type":"json_schema","json_schema":{
+            "name":"resident_action_reflection","strict":true,
+            "schema": crate::action_reflection::result_schema()
+        }}
+    })
+}
+
+/// 本地模型直接输出自省对象；转成一次隐藏工具调用，后面的运行器只认这一种形状。
+pub fn parse_local_action_reflection(
+    response: &Value,
+    request: &AgentRequest,
+) -> Result<ModelReply, ModelError> {
+    if response["choices"][0]["finish_reason"] == "length" {
+        return Err(ModelError::Reply(
+            "本地模型自省回复被输出长度上限截断".into(),
+        ));
+    }
+    let text = response["choices"][0]["message"]["content"]
+        .as_str()
+        .ok_or_else(|| ModelError::Reply("本地模型自省响应缺少 JSON 正文".into()))?;
+    let unique: UniqueJson = serde_json::from_str(text)
+        .map_err(|e| ModelError::Reply(format!("本地模型自省回复格式无效：{e}")))?;
+    let raw = serde_json::to_string(&unique.0)
+        .map_err(|e| ModelError::Reply(format!("本地模型自省回复无法回写：{e}")))?;
+    crate::action_reflection::ActionReflectionReply::parse(&raw).map_err(ModelError::Reply)?;
+    let call = ToolCall {
+        id: format!(
+            "local_reflection_{}_{}",
+            request.stamp.epoch, request.stamp.id
+        ),
+        name: crate::action_reflection::TOOL.into(),
+        arguments: unique.0,
+    };
+    let result = ModelReply {
+        thought: String::new(),
+        calls: vec![call],
+        usage: Usage::from_chat_completion(response),
+    };
+    result.validate()?;
+    Ok(result)
 }
 
 #[derive(Deserialize)]

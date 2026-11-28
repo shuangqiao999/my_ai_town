@@ -9,6 +9,8 @@ const RULES: &str = include_str!("../prompts/resident_agent.txt");
 const REFLECTION_RULES: &str = include_str!("../prompts/resident_reflection.txt");
 /// 交谈轮次的规则：轮到本人发言时的单次请求。占位符：unchanged_rule。
 const CHAT_RULES: &str = include_str!("../prompts/resident_chat.txt");
+/// 生活动作提交前的自省规则。
+const ACTION_REFLECTION_RULES: &str = include_str!("../prompts/resident_action_reflection.txt");
 
 /// 生活观察与交谈状态共用的「只发变化」说明。发出前没有值的小项不写（context::clean），
 /// 所以要说清：省略只说的是整个状态字段，出现了的字段里没写的项就是没有。
@@ -33,6 +35,10 @@ pub fn chat_system_prompt(instructions: &str) -> String {
 /// 整理轮次的 system。
 pub fn reflection_rules() -> String {
     fill(REFLECTION_RULES, &[("notes_max", &NOTES_MAX.to_string())])
+}
+/// 行动前自省的 system。
+pub fn action_reflection_system() -> String {
+    ACTION_REFLECTION_RULES.into()
 }
 /// 交谈轮次的调用出错，让模型改一次；再错就交出发言权。
 pub const CHAT_TOOLS_ONLY: &str =

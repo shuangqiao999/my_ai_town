@@ -1,6 +1,7 @@
 //! 村民决策：持续会话、工具调度、目标与记忆。
 //! 本 crate 不碰网络。查询读取本人的世界投影，身体动作与互动进入 kernel 命令校验。
 
+mod action_reflection;
 pub mod budget;
 pub mod builtin;
 pub mod completion;
