@@ -75,7 +75,9 @@ impl ToolName {
             RequestKind::Life => self != Self::Reflect,
             RequestKind::Reflection => REFLECTION_TOOLS.contains(&self),
             RequestKind::Chat => self == Self::Interact,
-            RequestKind::ActionReflection => false,
+            RequestKind::ActionReflection
+            | RequestKind::PostActionReview
+            | RequestKind::Calibration => false,
         }
     }
     /// 改变世界的工具：请求期间收到重要通知时退回，要求先重新观察。
@@ -424,6 +426,19 @@ pub fn validate_reflection_arguments(name: &str, arguments: &Value) -> Result<()
         }
     }
     Ok(())
+}
+
+/// 交谈轮次行动前自省可用的动作：只有 interact，参数与交谈轮次一致。
+pub fn chat_action_reflection_definitions() -> Vec<Value> {
+    let mut definition = spec(ToolName::Interact).definition();
+    definition["function"]["parameters"] = schema::chat_interact();
+    vec![json!({
+        "action_id": "interact",
+        "description": definition["function"]["description"],
+        "parameters": definition["function"]["parameters"],
+        "risk": "medium",
+        "cost": "会改变交谈、提议或关系状态"
+    })]
 }
 
 pub fn life_definitions(world: &World, actor: &str) -> Vec<Value> {

@@ -200,10 +200,11 @@ export type GoalStatus = 'active' | 'paused' | 'completed' | 'abandoned' | 'fail
 export type NoteStatus = 'candidate' | 'supported' | 'rejected'
 export type MemoryKind = 'episode' | 'recognition' | 'experience'
 export type MemoryStatus = 'active' | 'candidate' | 'superseded'
-export type EvidenceSource = 'observed' | 'reported' | 'inferred'
+export type EvidenceSource = 'observed' | 'reported' | 'inferred' | 'consolidated'
 export type InteractionStatus =
   'offered' | 'running' | 'succeeded' | 'declined' | 'cancelled' | 'expired' | 'interrupted'
-export type RequestKind = 'life' | 'reflection' | 'chat' | 'action_reflection'
+export type RequestKind =
+  'life' | 'reflection' | 'chat' | 'action_reflection' | 'post_action_review' | 'calibration'
 export type ReflectionGoalAlignment = 'high' | 'medium' | 'low'
 export type ReflectionRisk = 'none' | 'low' | 'medium' | 'high'
 export type RequestStatus =
@@ -270,9 +271,81 @@ export interface ResidentDetailView {
     at: number
     replaces: number[]
     events: WorldFact[]
+    tags: string[]
+    importance: number
   }[]
   /** 最近一次行动前自省；只在角色卡显示，不进公共事件流 */
   reflection?: ActionReflectionView
+  outcome_records?: OutcomeRecordView[]
+  consolidation_records?: ConsolidationRecordView[]
+  calibration_records?: CalibrationRecordView[]
+  personality?: PersonalityView
+  self_model?: SelfModelView
+  pending_goal_adjustment?: PendingGoalAdjustmentView
+}
+
+export type PredictionAccuracy = 'accurate' | 'optimistic' | 'pessimistic' | 'unknown'
+export type GoalProgress = 'advanced' | 'stalled' | 'regressed' | 'unknown'
+
+export interface OutcomeRecordView {
+  sim_minutes: number
+  clock: string
+  summary: string
+  prediction_accuracy: PredictionAccuracy
+  goal_progress: GoalProgress
+  goal_note: string
+  unexpected_effects: string[]
+  lesson: string
+  confidence_delta: number
+}
+
+export interface ConsolidatedLessonView {
+  text: string
+  evidence: string
+  confidence: number
+  tags: string[]
+}
+
+export interface RelationshipUpdateView {
+  target: string
+  judgment: string
+  trust_delta: number
+}
+
+export interface ConsolidationRecordView {
+  sim_minutes: number
+  clock: string
+  period_summary: string
+  lessons: ConsolidatedLessonView[]
+  relationship_updates: RelationshipUpdateView[]
+  self_model: SelfModelView
+  goal_adjustment?: PendingGoalAdjustmentView
+}
+
+export interface CalibrationRecordView {
+  sim_minutes: number
+  clock: string
+  summary: string
+  personality_note: string
+}
+
+export interface PersonalityView {
+  caution: number
+  trust_baseline: number
+  exploration: number
+  social_initiative: number
+  reflection_confidence: number
+}
+
+export interface SelfModelView {
+  strengths: string[]
+  weaknesses: string[]
+  identity_note: string
+}
+
+export interface PendingGoalAdjustmentView {
+  reason: string
+  suggested_long_term_goals: string[]
 }
 
 export interface ActionReflectionView {

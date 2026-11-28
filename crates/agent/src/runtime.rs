@@ -22,6 +22,7 @@ mod action_reflection;
 mod arrivals;
 mod chat;
 mod controlled;
+mod growth;
 mod input;
 mod invitations;
 mod ledger;
@@ -232,6 +233,10 @@ pub struct ResidentRuntime {
     pending_action_reflections: BTreeMap<String, action_reflection::PendingActionReflection>,
     /// 已登记、下一次 poll 交给 host 的自省请求。
     queued_action_reflections: Vec<AgentRequest>,
+    /// 已登记、下一次 poll 交给 host 的成长请求（事后评估 / 人格校准）。
+    queued_growth_requests: Vec<AgentRequest>,
+    /// 等待动作/互动终态后做事后评估的草案；只在内存里。
+    pending_post_reviews: BTreeMap<String, growth::PendingPostReview>,
 }
 
 impl ResidentRuntime {
@@ -260,6 +265,8 @@ impl ResidentRuntime {
             wall_clock: 0,
             pending_action_reflections: BTreeMap::new(),
             queued_action_reflections: Vec::new(),
+            queued_growth_requests: Vec::new(),
+            pending_post_reviews: BTreeMap::new(),
         })
     }
     pub fn state(&self) -> &RuntimeState {
@@ -327,7 +334,9 @@ impl ResidentRuntime {
     ) -> Vec<AgentRequest> {
         self.wall_clock = unix_now;
         let mut requests = if running {
-            std::mem::take(&mut self.queued_action_reflections)
+            let mut queued = std::mem::take(&mut self.queued_action_reflections);
+            queued.append(&mut self.queued_growth_requests);
+            queued
         } else {
             Vec::new()
         };

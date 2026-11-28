@@ -35,7 +35,9 @@ impl ResidentRuntime {
                     s.notebook.reading_dialogue.push(message);
                 }
             }
-            RequestKind::ActionReflection => {}
+            RequestKind::ActionReflection
+            | RequestKind::PostActionReview
+            | RequestKind::Calibration => {}
         }
         let data = json!({
             "call_id": result.call.id,
@@ -110,6 +112,9 @@ impl ResidentRuntime {
         }
         let success = item.status == InteractionStatus::Succeeded;
         let value = json!({"ok":success,"interaction":item});
+        if let Some(pending) = self.pending_post_review(&s.actor_id).cloned() {
+            self.begin_post_review(world, s, &pending, value.clone());
+        }
         self.complete_tool(
             world,
             s,
@@ -161,6 +166,9 @@ impl ResidentRuntime {
             ));
             self.record(world, s, Trace::new("action_result", value));
             return true;
+        }
+        if let Some(pending) = self.pending_post_review(&s.actor_id).cloned() {
+            self.begin_post_review(world, s, &pending, value.clone());
         }
         self.complete_tool(
             world,

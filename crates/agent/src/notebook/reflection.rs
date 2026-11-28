@@ -11,6 +11,64 @@ pub struct ReflectionUpdate {
     pub through_event: u64,
     pub summary: String,
     pub notes: Vec<NoteUpdate>,
+    #[serde(default)]
+    pub memory_writes: Vec<MemoryWrite>,
+    #[serde(default)]
+    pub lessons: Vec<LessonUpdate>,
+    #[serde(default)]
+    pub relationship_updates: Vec<RelationshipUpdate>,
+    #[serde(default)]
+    pub self_model_update: Option<SelfModelUpdate>,
+    #[serde(default)]
+    pub goal_adjustment: Option<GoalAdjustment>,
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct MemoryWrite {
+    pub text: String,
+    pub importance: f64,
+    #[serde(default)]
+    pub tags: Vec<String>,
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct LessonUpdate {
+    pub text: String,
+    pub evidence: String,
+    pub confidence: f64,
+    #[serde(default)]
+    pub tags: Vec<String>,
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct RelationshipUpdate {
+    pub target: String,
+    pub judgment: String,
+    pub trust_delta: f64,
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct SelfModelUpdate {
+    #[serde(default)]
+    pub strengths: Vec<String>,
+    #[serde(default)]
+    pub weaknesses: Vec<String>,
+    #[serde(default)]
+    pub identity_note: String,
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct GoalAdjustment {
+    pub needed: bool,
+    #[serde(default)]
+    pub reason: String,
+    #[serde(default)]
+    pub suggested_long_term_goals: Vec<String>,
 }
 #[derive(Debug, Deserialize)]
 #[serde(deny_unknown_fields)]
@@ -107,6 +165,34 @@ fn check_update(
     {
         return Err("整理进度、摘要或主题数量无效".into());
     }
+    if update.memory_writes.len() > 8
+        || update.lessons.len() > 5
+        || update.relationship_updates.len() > 5
+    {
+        return Err("整理提炼条数超过上限".into());
+    }
+    for write in &update.memory_writes {
+        if write.text.trim().is_empty()
+            || write.text.chars().count() > 160
+            || !write.importance.is_finite()
+            || !(0.0..=1.0).contains(&write.importance)
+        {
+            return Err("长期记忆候选无效".into());
+        }
+    }
+    for lesson in &update.lessons {
+        if lesson.text.trim().is_empty()
+            || !lesson.confidence.is_finite()
+            || !(0.0..=1.0).contains(&lesson.confidence)
+        {
+            return Err("经验规律无效".into());
+        }
+    }
+    for relation in &update.relationship_updates {
+        if relation.target.trim().is_empty() || !(-1.0..=1.0).contains(&relation.trust_delta) {
+            return Err("关系更新无效".into());
+        }
+    }
     let mut paths = BTreeSet::new();
     for note in &update.notes {
         if !paths.insert(&note.path) {
@@ -150,10 +236,10 @@ pub fn apply_reflection(
             p.text.clone()
                 + &prompts::day_summary_section(batch.from + 1, batch.through, &update.summary)
         }
-        None => update.summary,
+        None => update.summary.clone(),
     };
     let mut evidence = previous.map(|p| p.evidence.clone()).unwrap_or_default();
-    evidence.extend(batch.event_ids);
+    evidence.extend(batch.event_ids.iter().copied());
     evidence.sort_unstable();
     evidence.dedup();
     replace(
@@ -175,6 +261,71 @@ pub fn apply_reflection(
     book.retry_after = now;
     book.request = None;
     book.reading_dialogue.clear();
+
+    let growth = !update.memory_writes.is_empty()
+        || !update.lessons.is_empty()
+        || !update.relationship_updates.is_empty()
+        || update.self_model_update.is_some()
+        || update.goal_adjustment.is_some();
+    for write in &update.memory_writes {
+        session.memory.write_consolidated(
+            &session.actor_id,
+            write.text.clone(),
+            write.importance,
+            write.tags.clone(),
+            batch.event_ids.clone(),
+            now,
+        );
+    }
+    if let Some(update) = &update.self_model_update {
+        if !update.strengths.is_empty() {
+            session.self_model.strengths = update.strengths.clone();
+        }
+        if !update.weaknesses.is_empty() {
+            session.self_model.weaknesses = update.weaknesses.clone();
+        }
+        if !update.identity_note.is_empty() {
+            session.self_model.identity_note = update.identity_note.clone();
+        }
+    }
+    session.pending_goal_adjustment = update
+        .goal_adjustment
+        .as_ref()
+        .filter(|goal| goal.needed)
+        .map(|goal| protocol::PendingGoalAdjustmentView {
+            reason: goal.reason.clone(),
+            suggested_long_term_goals: goal.suggested_long_term_goals.clone(),
+        });
+    let lessons: Vec<protocol::ConsolidatedLessonView> = update
+        .lessons
+        .iter()
+        .map(|lesson| protocol::ConsolidatedLessonView {
+            text: lesson.text.clone(),
+            evidence: lesson.evidence.clone(),
+            confidence: lesson.confidence,
+            tags: lesson.tags.clone(),
+        })
+        .collect();
+    let relationship_updates: Vec<protocol::RelationshipUpdateView> = update
+        .relationship_updates
+        .iter()
+        .map(|relation| protocol::RelationshipUpdateView {
+            target: relation.target.clone(),
+            judgment: relation.judgment.clone(),
+            trust_delta: relation.trust_delta,
+        })
+        .collect();
+    let record = protocol::ConsolidationRecordView {
+        sim_minutes: now,
+        clock: kernel::clock_string(now),
+        period_summary: update.summary.clone(),
+        lessons,
+        relationship_updates,
+        self_model: session.self_model.clone(),
+        goal_adjustment: session.pending_goal_adjustment.clone(),
+    };
+    session.push_consolidation(record);
+    session.needs_calibration = growth;
     Ok(())
 }
 fn replace(session: &mut Session, mut page: Page) {

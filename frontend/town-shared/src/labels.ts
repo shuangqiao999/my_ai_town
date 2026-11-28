@@ -43,6 +43,8 @@ export const requestKindLabels: Record<RequestKind, string> = {
   reflection: '记忆整理',
   chat: '交谈发言',
   action_reflection: '行动反思',
+  post_action_review: '行动回顾',
+  calibration: '人格校准',
 }
 
 export const requestStatusLabels: Record<RequestStatus, string> = {
@@ -83,8 +85,9 @@ export const memoryKindLabels: Record<MemoryKind, string> = {
 
 export const memorySourceLabels: Record<EvidenceSource, string> = {
   observed: '亲眼看到',
-  reported: '听别人说的',
-  inferred: '自己推测的',
+  reported: '听别人说',
+  inferred: '自己推测',
+  consolidated: '整理提炼',
 }
 
 export const memoryStatusLabels: Record<MemoryStatus, string> = {

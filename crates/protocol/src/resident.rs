@@ -110,6 +110,10 @@ pub enum RequestKind {
     Chat,
     /// 生活动作提交前的自省；确认或修正草案，不直接改变世界。
     ActionReflection,
+    /// 动作完成后的事后对照；只评估不重新决策。
+    PostActionReview,
+    /// 周期整理之后的人格与策略校准；只微调倾向参数。
+    Calibration,
 }
 
 /// 请求结果。存档里旧的中文值可反序列化。
@@ -179,6 +183,8 @@ pub enum EvidenceSource {
     Observed,
     Reported,
     Inferred,
+    /// 周期整理提炼出的长期认知，来源仍是整理引用的动作回执事件。
+    Consolidated,
 }
 
 /// 名册里每拍都带的 Agent 状态：画面和各面板判断用，名册每 0.1 秒整份广播，所以只放它们每拍要看的。
@@ -217,6 +223,117 @@ pub struct ResidentDetailView {
     /// 最近一次行动前自省；只给角色卡看，不进公共事件流。
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub reflection: Option<ActionReflectionView>,
+    /// 成长回路的可见记录；都只进角色卡，不进公共事件流。
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub outcome_records: Vec<OutcomeRecordView>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub consolidation_records: Vec<ConsolidationRecordView>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub calibration_records: Vec<CalibrationRecordView>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub personality: Option<PersonalityView>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub self_model: Option<SelfModelView>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub pending_goal_adjustment: Option<PendingGoalAdjustmentView>,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum PredictionAccuracy {
+    Accurate,
+    Optimistic,
+    Pessimistic,
+    Unknown,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum GoalProgress {
+    Advanced,
+    Stalled,
+    Regressed,
+    Unknown,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct OutcomeRecordView {
+    pub sim_minutes: f64,
+    pub clock: String,
+    pub summary: String,
+    pub prediction_accuracy: PredictionAccuracy,
+    pub goal_progress: GoalProgress,
+    pub goal_note: String,
+    pub unexpected_effects: Vec<String>,
+    pub lesson: String,
+    pub confidence_delta: f64,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct ConsolidationRecordView {
+    pub sim_minutes: f64,
+    pub clock: String,
+    pub period_summary: String,
+    pub lessons: Vec<ConsolidatedLessonView>,
+    pub relationship_updates: Vec<RelationshipUpdateView>,
+    pub self_model: SelfModelView,
+    pub goal_adjustment: Option<PendingGoalAdjustmentView>,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct ConsolidatedLessonView {
+    pub text: String,
+    pub evidence: String,
+    pub confidence: f64,
+    pub tags: Vec<String>,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct RelationshipUpdateView {
+    pub target: String,
+    pub judgment: String,
+    pub trust_delta: f64,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct CalibrationRecordView {
+    pub sim_minutes: f64,
+    pub clock: String,
+    pub summary: String,
+    pub personality_note: String,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize)]
+pub struct PersonalityView {
+    pub caution: f64,
+    pub trust_baseline: f64,
+    pub exploration: f64,
+    pub social_initiative: f64,
+    pub reflection_confidence: f64,
+}
+impl Default for PersonalityView {
+    fn default() -> Self {
+        Self {
+            caution: 0.5,
+            trust_baseline: 0.5,
+            exploration: 0.5,
+            social_initiative: 0.5,
+            reflection_confidence: 0.5,
+        }
+    }
+}
+
+#[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
+pub struct SelfModelView {
+    pub strengths: Vec<String>,
+    pub weaknesses: Vec<String>,
+    pub identity_note: String,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct PendingGoalAdjustmentView {
+    pub reason: String,
+    pub suggested_long_term_goals: Vec<String>,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
@@ -252,6 +369,11 @@ pub struct ActionReflectionView {
     pub confidence: f64,
     pub reason: String,
     pub memory_note: String,
+    /// 修正/确认引用的依据；人格倾向如何影响判断。
+    #[serde(default)]
+    pub evidence_used: Vec<String>,
+    #[serde(default)]
+    pub personality_influence: String,
 }
 
 /// 村民在等什么：自己写的理由、最迟醒来的时刻，以及哪类事件来了会提前醒（只按时间等时没有）。
@@ -417,4 +539,8 @@ pub struct ResidentMemoryView {
     pub at: f64,
     pub replaces: Vec<u64>,
     pub events: Vec<WorldFact>,
+    #[serde(default)]
+    pub tags: Vec<String>,
+    #[serde(default)]
+    pub importance: f64,
 }

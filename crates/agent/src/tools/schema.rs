@@ -324,6 +324,47 @@ pub(super) fn reflect() -> Value {
         }),
         &["path", "title", "text", "event_ids", "status"],
     );
+    let memory_write = object(
+        json!({
+            "text": string(NOTE_TEXT_CHARS),
+            "importance": {"type":"number","minimum":0,"maximum":1},
+            "tags": {"type":"array","items":string(16)}
+        }),
+        &["text", "importance", "tags"],
+    );
+    let lesson = object(
+        json!({
+            "text": string(NOTE_TEXT_CHARS),
+            "evidence": string(NOTE_TEXT_CHARS),
+            "confidence": {"type":"number","minimum":0,"maximum":1},
+            "tags": {"type":"array","items":string(16)}
+        }),
+        &["text", "evidence", "confidence", "tags"],
+    );
+    let relationship = object(
+        json!({
+            "target": string(80),
+            "judgment": string(NOTE_TEXT_CHARS),
+            "trust_delta": {"type":"number","minimum":-1,"maximum":1}
+        }),
+        &["target", "judgment", "trust_delta"],
+    );
+    let self_model = object(
+        json!({
+            "strengths": {"type":"array","items":string(60)},
+            "weaknesses": {"type":"array","items":string(60)},
+            "identity_note": string(NOTE_TEXT_CHARS)
+        }),
+        &["strengths", "weaknesses", "identity_note"],
+    );
+    let goal_adjustment = object(
+        json!({
+            "needed": {"type":"boolean"},
+            "reason": string(NOTE_TEXT_CHARS),
+            "suggested_long_term_goals": {"type":"array","items":string(80)}
+        }),
+        &["needed", "reason", "suggested_long_term_goals"],
+    );
     object(
         json!({
             "through_event": {"type":"integer","minimum":1},
@@ -331,7 +372,12 @@ pub(super) fn reflect() -> Value {
             "notes": described(
                 json!({"type":"array","maxItems":NOTES_MAX,"items":note}),
                 "由你决定记什么，允许空数组；引用书中原文先用 read_content 核对"
-            )
+            ),
+            "memory_writes": {"type":"array","maxItems":8,"items":memory_write},
+            "lessons": {"type":"array","maxItems":5,"items":lesson},
+            "relationship_updates": {"type":"array","maxItems":5,"items":relationship},
+            "self_model_update": self_model,
+            "goal_adjustment": goal_adjustment
         }),
         &["through_event", "summary", "notes"],
     )

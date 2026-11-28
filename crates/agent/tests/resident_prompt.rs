@@ -229,6 +229,8 @@ impl Scene {
                 json!({"event":"interaction","reason":"等人来找"}),
             ),
             RequestKind::ActionReflection => ("submit_action_reflection", json!({})),
+            RequestKind::PostActionReview => ("submit_post_review", json!({})),
+            RequestKind::Calibration => ("submit_calibration", json!({})),
         };
         self.answer(q, vec![call]);
     }

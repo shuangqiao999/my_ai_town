@@ -15,6 +15,21 @@ fn action_reflection_default() -> bool {
     false
 }
 
+/// 角色卡有界窗口的上限；超出后丢弃最旧的，避免 world.json 重新长大。
+const OUTCOME_RECORDS_MAX: usize = 20;
+const CONSOLIDATION_RECORDS_MAX: usize = 5;
+const CALIBRATION_RECORDS_MAX: usize = 5;
+const MEMORY_CANDIDATES_MAX: usize = 16;
+
+/// 事后评估留下的候选长期记忆：只有整理提炼后才会进入 MemoryStore。
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct MemoryCandidate {
+    pub at: f64,
+    pub text: String,
+    pub importance: f64,
+    pub tags: Vec<String>,
+}
+
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(tag = "kind", rename_all = "snake_case", deny_unknown_fields)]
 pub enum GoalCondition {
@@ -353,6 +368,27 @@ pub struct Session {
     /// 当前模型能否做行动前自省；内置模型按训练题面关闭。
     #[serde(default = "action_reflection_default")]
     pub action_reflection: bool,
+    /// 成长回路的人格倾向；由 Calibration 微调。
+    #[serde(default)]
+    pub personality: protocol::PersonalityView,
+    /// 成长回路的自我认知。
+    #[serde(default)]
+    pub self_model: protocol::SelfModelView,
+    /// 事后评估与周期提炼的角色卡记录（有界窗口，更早的只留摘要）。
+    #[serde(default)]
+    pub outcome_records: Vec<protocol::OutcomeRecordView>,
+    #[serde(default)]
+    pub consolidation_records: Vec<protocol::ConsolidationRecordView>,
+    #[serde(default)]
+    pub calibration_records: Vec<protocol::CalibrationRecordView>,
+    #[serde(default)]
+    pub pending_goal_adjustment: Option<protocol::PendingGoalAdjustmentView>,
+    /// 事后评估留下的候选长期记忆，供下一次整理提炼消费。
+    #[serde(default)]
+    pub memory_candidates: Vec<MemoryCandidate>,
+    /// 刚完成一次带成长字段的整理，需要紧接着做人格校准。
+    #[serde(default)]
+    pub needs_calibration: bool,
     #[serde(flatten)]
     wake: Wake,
     #[serde(flatten)]
@@ -389,6 +425,14 @@ impl Session {
             notebook: Default::default(),
             last_action_reflection: None,
             action_reflection: action_reflection_default(),
+            personality: Default::default(),
+            self_model: Default::default(),
+            outcome_records: Vec::new(),
+            consolidation_records: Vec::new(),
+            calibration_records: Vec::new(),
+            pending_goal_adjustment: None,
+            memory_candidates: Vec::new(),
+            needs_calibration: false,
             wake: Default::default(),
             streaks: Default::default(),
             folded: Default::default(),
@@ -442,6 +486,14 @@ impl Session {
             },
             last_action_reflection: self.last_action_reflection.clone(),
             action_reflection: self.action_reflection,
+            personality: self.personality,
+            self_model: self.self_model.clone(),
+            outcome_records: self.outcome_records.clone(),
+            consolidation_records: self.consolidation_records.clone(),
+            calibration_records: self.calibration_records.clone(),
+            pending_goal_adjustment: self.pending_goal_adjustment.clone(),
+            memory_candidates: self.memory_candidates.clone(),
+            needs_calibration: self.needs_calibration,
             wake: self.wake.clone(),
             streaks: self.streaks.clone(),
             folded: Folded {
@@ -454,6 +506,31 @@ impl Session {
             retry_tools: self.retry_tools.clone(),
         }
     }
+    pub fn push_outcome(&mut self, record: protocol::OutcomeRecordView) {
+        push_bounded(&mut self.outcome_records, record, OUTCOME_RECORDS_MAX);
+    }
+    pub fn push_consolidation(&mut self, record: protocol::ConsolidationRecordView) {
+        push_bounded(
+            &mut self.consolidation_records,
+            record,
+            CONSOLIDATION_RECORDS_MAX,
+        );
+    }
+    pub fn push_calibration(&mut self, record: protocol::CalibrationRecordView) {
+        push_bounded(
+            &mut self.calibration_records,
+            record,
+            CALIBRATION_RECORDS_MAX,
+        );
+    }
+    pub fn push_memory_candidate(&mut self, candidate: MemoryCandidate) {
+        push_bounded(
+            &mut self.memory_candidates,
+            candidate,
+            MEMORY_CANDIDATES_MAX,
+        );
+    }
+
     /// 记下这一轮当场被退回的工具，下一轮据此判断回复是不是只在改正调用。
     pub(crate) fn remember_retry_tools(&mut self, names: BTreeSet<String>) {
         self.retry_tools = names;
@@ -649,4 +726,11 @@ impl Session {
         self.folded.known_tokens = None;
         Some(stamp)
     }
+}
+
+fn push_bounded<T>(list: &mut Vec<T>, value: T, max: usize) {
+    if list.len() >= max {
+        list.remove(0);
+    }
+    list.push(value);
 }

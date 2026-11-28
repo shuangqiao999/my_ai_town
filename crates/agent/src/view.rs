@@ -221,6 +221,8 @@ fn memory_views(s: &Session, a: &Actor) -> Vec<ResidentMemoryView> {
             confidence: m.confidence,
             text: m.text.chars().take(TEXT_PREVIEW_CHARS).collect(),
             at: m.at,
+            tags: m.tags.clone(),
+            importance: m.importance,
             replaces: m.replaces.clone(),
             events: m
                 .event_ids
@@ -297,6 +299,12 @@ impl ResidentRuntime {
                 .collect(),
             memories: memories.get(s, a),
             reflection: s.last_action_reflection.clone(),
+            outcome_records: s.outcome_records.clone(),
+            consolidation_records: s.consolidation_records.clone(),
+            calibration_records: s.calibration_records.clone(),
+            personality: Some(s.personality),
+            self_model: Some(s.self_model.clone()),
+            pending_goal_adjustment: s.pending_goal_adjustment.clone(),
         })
     }
 }

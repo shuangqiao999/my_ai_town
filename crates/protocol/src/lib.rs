@@ -88,10 +88,13 @@ pub use props::{
 pub use recording::ReelView;
 pub use resident::{
     ActionReflectionView, ActionResultView, AgentLimitRanges, AgentLimits, AgentState, AgentUsage,
-    AgentWaitView, EvidenceSource, GoalMark, GoalStatus, HoldCause, LimitRange, MemoryKind,
-    MemoryStatus, PauseKind, ReflectionGoalAlignment, ReflectionRisk, RequestKind, RequestStatus,
-    RequestView, ResidentAgentView, ResidentDetailView, ResidentGoalView, ResidentInteractionView,
-    ResidentMemoryView, ResidentUsage, UsageSummary, WorldHold,
+    AgentWaitView, CalibrationRecordView, ConsolidatedLessonView, ConsolidationRecordView,
+    EvidenceSource, GoalMark, GoalProgress, GoalStatus, HoldCause, LimitRange, MemoryKind,
+    MemoryStatus, OutcomeRecordView, PauseKind, PendingGoalAdjustmentView, PersonalityView,
+    PredictionAccuracy, ReflectionGoalAlignment, ReflectionRisk, RelationshipUpdateView,
+    RequestKind, RequestStatus, RequestView, ResidentAgentView, ResidentDetailView,
+    ResidentGoalView, ResidentInteractionView, ResidentMemoryView, ResidentUsage, SelfModelView,
+    UsageSummary, WorldHold,
 };
 pub use roster::{
     ActivityKind, MemberKind, MovementPhase, MovementView, PlanView, RosterLocale, RosterMember,

@@ -98,6 +98,32 @@ pub fn complete(target: &LlmTarget, request: &AgentRequest) -> Result<ModelReply
         let response = post_completion(target, &body)?;
         return completion::parse_tool_reply(&response);
     }
+    if matches!(
+        request.stamp.kind,
+        protocol::RequestKind::PostActionReview | protocol::RequestKind::Calibration
+    ) {
+        if target.provider == crate::builtin::PROVIDER {
+            return Err(ModelError::NotSent("内置模型不接受成长回路".into()));
+        }
+        let tool = match request.stamp.kind {
+            protocol::RequestKind::PostActionReview => "submit_post_review",
+            protocol::RequestKind::Calibration => "submit_calibration",
+            _ => unreachable!(),
+        };
+        if local_qwen {
+            let body = completion::local_growth_request_body(
+                request,
+                &target.model,
+                completion::growth_schema(request.stamp.kind),
+            );
+            let response = post_completion(target, &body)?;
+            return completion::parse_local_growth(&response, request, tool);
+        }
+        let mut body = completion::tool_request_body(request, &target.model);
+        body["temperature"] = json!(0.3);
+        let response = post_completion(target, &body)?;
+        return completion::parse_tool_reply(&response);
+    }
     let mut body = if local_qwen {
         completion::local_tool_request_body(request, &target.model)
     } else {

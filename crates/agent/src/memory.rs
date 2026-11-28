@@ -33,6 +33,12 @@ pub struct MemoryRecord {
     pub fact_kind: Option<FactKind>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub readable: Option<protocol::ReadableFact>,
+    /// 周期整理提炼打上的标签（survival/social/goal/risk/identity/skill）。
+    #[serde(default)]
+    pub tags: Vec<String>,
+    /// 长期认知的重要性（0–1）；只有整理提炼出的记录才会非 0。
+    #[serde(default)]
+    pub importance: f64,
 }
 
 /// 事件编号到事件的索引，整理一批回执时只建一次。
@@ -66,6 +72,8 @@ impl MemoryRecord {
             revision: 0,
             fact_kind: None,
             readable: None,
+            tags: Vec::new(),
+            importance: 0.0,
         }
     }
     /// 原始经历：别人说的话记为转述，可信度减半。
@@ -117,6 +125,34 @@ impl MemoryRecord {
             ..Self::blank(actor, MemoryKind::Recognition, key)
         }
     }
+    /// 周期整理提炼出的长期认知：来源是整理引用的动作回执事件，带标签和重要性。
+    fn consolidated(
+        actor: &str,
+        text: String,
+        importance: f64,
+        tags: Vec<String>,
+        event_ids: Vec<u64>,
+        at: f64,
+    ) -> Self {
+        let mut hasher = std::collections::hash_map::DefaultHasher::new();
+        use std::hash::{Hash, Hasher};
+        text.hash(&mut hasher);
+        let key = format!("consolidated:{:016x}", hasher.finish());
+        Self {
+            event_ids,
+            at,
+            objects: Vec::new(),
+            source: EvidenceSource::Consolidated,
+            confidence: importance,
+            text,
+            fact_kind: None,
+            readable: None,
+            tags,
+            importance,
+            ..Self::blank(actor, MemoryKind::Experience, key)
+        }
+    }
+
     /// 失败后的候选经验：再做同一动作前先检查条件。
     fn experience(actor: &str, result: &ActionResult, key: String, reason: &str) -> Self {
         Self {
@@ -289,6 +325,30 @@ impl MemoryStore {
         self.records.push(record);
     }
 
+    /// 写入一条整理提炼出的长期认知；同一条再写会先修正旧版本（保留旧版本在 history/状态里可见）。
+    pub fn write_consolidated(
+        &mut self,
+        actor: &str,
+        text: String,
+        importance: f64,
+        tags: Vec<String>,
+        event_ids: Vec<u64>,
+        at: f64,
+    ) {
+        let mut probe = MemoryRecord::consolidated(
+            actor,
+            text.clone(),
+            importance,
+            tags.clone(),
+            event_ids.clone(),
+            at,
+        );
+        let replaces =
+            self.retire(|r| r.source == EvidenceSource::Consolidated && r.key == probe.key);
+        probe.replaces = replaces;
+        self.push(probe);
+    }
+
     pub fn validate(&self, world: &World, actor: &str) -> Result<(), String> {
         let a = world.actor(actor).ok_or("记忆所属村民不存在")?;
         if self.consolidated_cursor > self.ingested_cursor
@@ -302,6 +362,12 @@ impl MemoryStore {
                 || !(0.0..=1.0).contains(&record.confidence)
                 || !record.at.is_finite()
                 || record.at > world.minutes()
+                || !record.importance.is_finite()
+                || !(0.0..=1.0).contains(&record.importance)
+                || record
+                    .tags
+                    .iter()
+                    .any(|tag| tag.is_empty() || tag.len() > 32)
                 || record.revision > self.revision
                 || record.event_ids.is_empty()
                 || record.event_ids.iter().any(|id| event(a, *id).is_none())

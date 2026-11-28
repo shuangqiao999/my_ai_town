@@ -663,6 +663,16 @@ pub fn local_tool_request_body(request: &AgentRequest, model: &str) -> Value {
     if request.stamp.kind == protocol::RequestKind::ActionReflection {
         return local_action_reflection_request_body(request, model);
     }
+    if matches!(
+        request.stamp.kind,
+        protocol::RequestKind::PostActionReview | protocol::RequestKind::Calibration
+    ) {
+        return local_growth_request_body(
+            request,
+            model,
+            crate::growth::request_schema(request.stamp.kind),
+        );
+    }
     let tools = local_tools(request);
     let guide = guidance(request, &tools);
     let mut messages = wire_history(request);
@@ -744,6 +754,47 @@ pub fn parse_local_action_reflection(
             request.stamp.epoch, request.stamp.id
         ),
         name: crate::action_reflection::TOOL.into(),
+        arguments: unique.0,
+    };
+    let result = ModelReply {
+        thought: String::new(),
+        calls: vec![call],
+        usage: Usage::from_chat_completion(response),
+    };
+    result.validate()?;
+    Ok(result)
+}
+
+pub fn local_growth_request_body(request: &AgentRequest, model: &str, schema: Value) -> Value {
+    json!({
+        "model": model,
+        "max_tokens": request.max_output_tokens,
+        "messages": wire_history(request),
+        "response_format": {"type":"json_schema","json_schema":{
+            "name":"resident_growth","strict":true,"schema":schema
+        }}
+    })
+}
+
+/// 本地模型直接输出成长对象；转成一次隐藏工具调用，后面的运行器只认这一种形状。
+pub fn parse_local_growth(
+    response: &Value,
+    request: &AgentRequest,
+    tool: &str,
+) -> Result<ModelReply, ModelError> {
+    if response["choices"][0]["finish_reason"] == "length" {
+        return Err(ModelError::Reply(
+            "本地模型成长回复被输出长度上限截断".into(),
+        ));
+    }
+    let text = response["choices"][0]["message"]["content"]
+        .as_str()
+        .ok_or_else(|| ModelError::Reply("本地模型成长响应缺少 JSON 正文".into()))?;
+    let unique: UniqueJson = serde_json::from_str(text)
+        .map_err(|e| ModelError::Reply(format!("本地模型成长回复格式无效：{e}")))?;
+    let call = ToolCall {
+        id: format!("local_growth_{}_{}", request.stamp.epoch, request.stamp.id),
+        name: tool.into(),
         arguments: unique.0,
     };
     let result = ModelReply {

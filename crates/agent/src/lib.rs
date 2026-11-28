@@ -8,6 +8,7 @@ pub mod completion;
 pub mod context;
 pub mod conversation;
 mod error;
+mod growth;
 pub mod interaction;
 pub mod labels;
 pub mod looks;

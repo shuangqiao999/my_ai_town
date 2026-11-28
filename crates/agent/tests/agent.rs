@@ -3,6 +3,7 @@ mod support;
 
 mod action_reflection;
 mod builtin_model;
+mod growth_loop;
 mod resident_context;
 mod resident_interactions;
 mod resident_notebook;

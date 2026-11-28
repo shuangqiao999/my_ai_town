@@ -11,6 +11,10 @@ const REFLECTION_RULES: &str = include_str!("../prompts/resident_reflection.txt"
 const CHAT_RULES: &str = include_str!("../prompts/resident_chat.txt");
 /// 生活动作提交前的自省规则。
 const ACTION_REFLECTION_RULES: &str = include_str!("../prompts/resident_action_reflection.txt");
+/// 行动后结果评估规则。
+const POST_REVIEW_RULES: &str = include_str!("../prompts/resident_post_review.txt");
+/// 人格与策略校准规则。
+const CALIBRATION_RULES: &str = include_str!("../prompts/resident_calibration.txt");
 
 /// 生活观察与交谈状态共用的「只发变化」说明。发出前没有值的小项不写（context::clean），
 /// 所以要说清：省略只说的是整个状态字段，出现了的字段里没写的项就是没有。
@@ -39,6 +43,14 @@ pub fn reflection_rules() -> String {
 /// 行动前自省的 system。
 pub fn action_reflection_system() -> String {
     ACTION_REFLECTION_RULES.into()
+}
+/// 行动后评估的 system。
+pub fn post_review_system() -> String {
+    POST_REVIEW_RULES.into()
+}
+/// 人格校准的 system。
+pub fn calibration_system() -> String {
+    CALIBRATION_RULES.into()
 }
 /// 交谈轮次的调用出错，让模型改一次；再错就交出发言权。
 pub const CHAT_TOOLS_ONLY: &str =

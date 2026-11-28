@@ -22,6 +22,10 @@ pub(crate) struct ActionReflectionReply {
     pub decision: DecisionPart,
     #[serde(default)]
     pub memory_note: String,
+    #[serde(default)]
+    pub evidence_used: Vec<String>,
+    #[serde(default)]
+    pub personality_influence: String,
 }
 
 #[derive(Debug, Clone, Deserialize)]
@@ -104,6 +108,8 @@ impl ActionReflectionReply {
             confidence: self.decision.confidence,
             reason: cut(&self.decision.reason, REASON_CHARS),
             memory_note: cut(&self.memory_note, MEMORY_NOTE_CHARS),
+            evidence_used: self.evidence_used.iter().map(|e| cut(e, 80)).collect(),
+            personality_influence: cut(&self.personality_influence, 120),
         }
     }
 }
@@ -164,7 +170,9 @@ pub(crate) fn result_schema() -> Value {
                 "required": ["calls", "confidence", "reason"],
                 "additionalProperties": false
             },
-            "memory_note": {"type": "string", "maxLength": MEMORY_NOTE_CHARS}
+            "memory_note": {"type": "string", "maxLength": MEMORY_NOTE_CHARS},
+            "evidence_used": {"type": "array", "items": {"type": "string", "maxLength": 80}},
+            "personality_influence": {"type": "string", "maxLength": 120}
         },
         "required": ["internal_thought", "reflection", "decision"],
         "additionalProperties": false

@@ -13,14 +13,18 @@ use kernel::World;
 use protocol::{ActionReflectionView, RequestKind};
 use serde_json::{json, Value};
 
-/// 修正必须明显更可信；低于这个值就继续用原来的草案。
-const CONFIDENCE_MIN: f64 = 0.55;
+/// 修正必须明显更可信；门槛随角色对自身反思的信任度浮动。
+fn confidence_min(reflection_confidence: f64) -> f64 {
+    (0.40 + 0.30 * reflection_confidence).clamp(0.35, 0.70)
+}
 
 pub(super) struct PendingActionReflection {
     draft: ModelReply,
     pub(super) original_stamp: RequestStamp,
     /// 草案中真正会改变世界的调用位置；前后查询类调用原样保留。
     reviewable: Vec<usize>,
+    /// 这次自省属于生活轮次还是交谈轮次。
+    pub(super) kind: RequestKind,
 }
 
 pub(super) enum Resolution {
@@ -45,11 +49,16 @@ impl ResidentRuntime {
         original_stamp: &RequestStamp,
         request_id: u64,
         reply: &ModelReply,
+        chat: bool,
     ) -> bool {
         if !s.action_reflection || s.in_flight.is_some() {
             return false;
         }
-        let legal = tools::action_reflection_definitions(world, &s.actor_id);
+        let legal = if chat {
+            tools::chat_action_reflection_definitions()
+        } else {
+            tools::action_reflection_definitions(world, &s.actor_id)
+        };
         let legal_ids: Vec<&str> = legal
             .iter()
             .filter_map(|a| a["action_id"].as_str())
@@ -117,24 +126,64 @@ impl ResidentRuntime {
         } else {
             "medium"
         };
-        let body = json!({
-            "task": "行动前自省：输出 JSON 自省结果，确认或修正草案；不执行动作。",
-            "time": world.clock(),
-            "character": s.instructions,
-            "observation": observation,
-            "goals": goals,
-            "recent_memories": memories,
-            "last_reflection": s.last_action_reflection,
-            "precheck": precheck,
-            "draft": {
-                "thought": reply.thought,
-                "calls": draft_calls,
-                "kept_calls": kept_calls,
-                "risk": risk,
-                "importance": if risk == "high" { 0.8 } else { 0.6 }
-            },
-            "legal_actions": legal
-        });
+        let body = if chat {
+            let chat_view = world
+                .active_chat(&s.actor_id)
+                .map(|item| crate::interaction::observation(world, &s.actor_id, item));
+            let recent: Vec<_> = s
+                .chat
+                .messages
+                .iter()
+                .rev()
+                .take(8)
+                .rev()
+                .cloned()
+                .collect();
+            json!({
+                "task": "交谈发言前自省：输出 JSON 自省结果，确认或修正这次发言；不执行动作。",
+                "time": world.clock(),
+                "character": s.instructions,
+                "chat": chat_view,
+                "recent_messages": recent,
+                "pending_turn": s.chat.pending,
+                "goals": goals,
+                "recent_memories": memories,
+                "personality": s.personality,
+                "self_model": s.self_model,
+                "relevant_lessons": consolidated_lessons(s),
+                "precheck": precheck,
+                "draft": {
+                    "thought": reply.thought,
+                    "calls": draft_calls,
+                    "kept_calls": kept_calls,
+                    "risk": risk,
+                    "importance": if risk == "high" { 0.8 } else { 0.6 }
+                },
+                "legal_actions": legal
+            })
+        } else {
+            json!({
+                "task": "行动前自省：输出 JSON 自省结果，确认或修正草案；不执行动作。",
+                "time": world.clock(),
+                "character": s.instructions,
+                "observation": observation,
+                "goals": goals,
+                "recent_memories": memories,
+                "last_reflection": s.last_action_reflection,
+                "personality": s.personality,
+                "self_model": s.self_model,
+                "relevant_lessons": consolidated_lessons(s),
+                "precheck": precheck,
+                "draft": {
+                    "thought": reply.thought,
+                    "calls": draft_calls,
+                    "kept_calls": kept_calls,
+                    "risk": risk,
+                    "importance": if risk == "high" { 0.8 } else { 0.6 }
+                },
+                "legal_actions": legal
+            })
+        };
         let tools = vec![action_reflection::tool_definition()];
         let tools_json = serde_json::to_string(&tools).expect("工具定义可序列化");
         let messages = vec![
@@ -199,6 +248,11 @@ impl ResidentRuntime {
                 draft: reply.clone(),
                 original_stamp: original_stamp.clone(),
                 reviewable,
+                kind: if chat {
+                    RequestKind::Chat
+                } else {
+                    RequestKind::Life
+                },
             },
         );
         self.queued_action_reflections.push(request);
@@ -211,6 +265,7 @@ impl ResidentRuntime {
         reply: Result<ModelReply, ModelError>,
         at: f64,
         reflection_id: u64,
+        reflection_confidence: f64,
     ) -> Resolution {
         let fallback =
             |view: Option<ActionReflectionView>| fallback_resolution(pending, view, reflection_id);
@@ -247,7 +302,9 @@ impl ResidentRuntime {
                 },
             };
         }
-        if parsed.decision.confidence < CONFIDENCE_MIN || parsed.decision.calls.is_empty() {
+        if parsed.decision.confidence < confidence_min(reflection_confidence)
+            || parsed.decision.calls.is_empty()
+        {
             return fallback(Some(view));
         }
         if parsed.decision.calls.iter().any(|call| {
@@ -327,6 +384,27 @@ fn fallback_resolution(
         calls,
         thought: pending.draft.thought.clone(),
     }
+}
+
+fn consolidated_lessons(s: &Session) -> Vec<Value> {
+    let mut lessons: Vec<_> = s
+        .memory
+        .records
+        .iter()
+        .filter(|m| {
+            m.source == protocol::EvidenceSource::Consolidated
+                && m.status != protocol::MemoryStatus::Superseded
+        })
+        .collect();
+    lessons.sort_by(|a, b| {
+        b.at.total_cmp(&a.at)
+            .then_with(|| b.memory_id.cmp(&a.memory_id))
+    });
+    lessons
+        .into_iter()
+        .take(6)
+        .map(|m| json!({"text": m.text, "tags": m.tags, "importance": m.importance}))
+        .collect()
 }
 
 fn reflection_memories(s: &Session) -> Vec<Value> {

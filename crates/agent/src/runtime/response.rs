@@ -127,6 +127,14 @@ impl ResidentRuntime {
             self.settle_action_reflection(world, s, &round, env.reply);
             return true;
         }
+        if round.kind == RequestKind::PostActionReview {
+            self.settle_post_review(world, s, &round, env.reply);
+            return true;
+        }
+        if round.kind == RequestKind::Calibration {
+            self.settle_calibration(world, s, &round, env.reply);
+            return true;
+        }
         if self.reject_outdated(world, s, &round) {
             return false;
         }
@@ -202,7 +210,14 @@ impl ResidentRuntime {
             reply.validate()?;
             Ok(reply)
         });
-        let resolution = self.resolve_action_reflection(&pending, reply, world.minutes(), round.id);
+        let reflection_confidence = s.personality.reflection_confidence;
+        let resolution = self.resolve_action_reflection(
+            &pending,
+            reply,
+            world.minutes(),
+            round.id,
+            reflection_confidence,
+        );
         let (accepted, view, calls, thought, check_stamp) = match resolution {
             super::action_reflection::Resolution::Accepted {
                 view,
@@ -215,14 +230,21 @@ impl ResidentRuntime {
                 thought,
             } => (false, view, calls, thought, pending.original_stamp.clone()),
         };
-        if !still_current(world, &s.actor_id, &check_stamp) {
+        let chat = pending.kind == RequestKind::Chat;
+        if !still_current(world, &s.actor_id, &check_stamp)
+            || (chat && !world.chat_turn(&s.actor_id))
+        {
             let cause = world
                 .actor(&s.actor_id)
                 .filter(|a| a.actions.revision != check_stamp.revision)
                 .map_or(OutdatedCause::Notice, |_| OutdatedCause::Revision);
             s.restart_wake_count();
-            s.messages
-                .push(Message::text(Role::User, prompts::OUTDATED_BY_REVISION));
+            if chat {
+                s.chat.pending = None;
+            } else {
+                s.messages
+                    .push(Message::text(Role::User, prompts::OUTDATED_BY_REVISION));
+            }
             self.note_outdated(world, s, round, cause);
             self.ledger_close(
                 round.id,
@@ -234,14 +256,14 @@ impl ResidentRuntime {
                 s,
                 Trace::new(
                     "action_reflection_discarded",
-                    json!({"cause":cause.as_str(),"accepted":accepted}),
+                    json!({"cause":cause.as_str(),"accepted":accepted,"chat":chat}),
                 )
                 .request(round.id),
             );
             return;
         }
-        if let Some(view) = view {
-            s.last_action_reflection = Some(view);
+        if let Some(view) = view.as_ref() {
+            s.last_action_reflection = Some(view.clone());
         }
         s.streaks.model_failures = 0;
         s.input.rejections = 0;
@@ -252,12 +274,77 @@ impl ResidentRuntime {
             calls: calls.clone(),
             call_id: None,
         };
-        s.messages.push(assistant);
         let final_reply = ModelReply {
             thought: thought.clone(),
             calls: calls.clone(),
             usage: None,
         };
+        let reviewable = calls.iter().any(|c| {
+            matches!(
+                c.name.as_str(),
+                "run_actions"
+                    | "interact"
+                    | "offer_invitation"
+                    | "reply_invitation"
+                    | "mode_action"
+            )
+        });
+        if chat {
+            s.chat.commit();
+            s.chat.messages.push(assistant);
+            if !thought.trim().is_empty() {
+                note_thought(world, &s.actor_id, RequestKind::Chat, &final_reply);
+            }
+            let exec_round = RepliedRound {
+                id: round.id,
+                stamp: round.stamp.clone(),
+                kind: RequestKind::Chat,
+                sent_messages: s.chat.messages.len(),
+                usage: round.usage,
+            };
+            let outcome = self.execute_calls(world, s, &exec_round, calls.clone());
+            let result = last_chat_tool_result(s);
+            let status = if outcome.outdated {
+                RequestStatus::Outdated
+            } else {
+                RequestStatus::Adopted
+            };
+            self.ledger_close(
+                round.id,
+                status,
+                if accepted {
+                    format!("发言前自省采纳：{}", outcome.names)
+                } else {
+                    format!("自省未采纳，按原草案发言：{}", outcome.names)
+                },
+            );
+            self.finish_chat_round(world, s, &exec_round, outcome.outdated);
+            if reviewable {
+                if let Some(view) = view {
+                    let pending = super::growth::PendingPostReview {
+                        pre_view: view,
+                        executed_calls: calls,
+                        revision: check_stamp.revision,
+                        seen_cursor: check_stamp.seen_cursor,
+                        sim_minutes: world.minutes(),
+                        chat: true,
+                    };
+                    self.store_pending_post_review(&s.actor_id, pending.clone());
+                    self.begin_post_review(world, s, &pending, result);
+                }
+            }
+            self.record(
+                world,
+                s,
+                Trace::new(
+                    "chat_action_reflection",
+                    json!({"accepted":accepted,"calls":outcome.names}),
+                )
+                .request(round.id),
+            );
+            return;
+        }
+        s.messages.push(assistant);
         if !thought.trim().is_empty() {
             note_thought(world, &s.actor_id, RequestKind::Life, &final_reply);
         }
@@ -268,7 +355,22 @@ impl ResidentRuntime {
             sent_messages: s.messages.len(),
             usage: round.usage,
         };
-        let outcome = self.execute_calls(world, s, &exec_round, calls);
+        let outcome = self.execute_calls(world, s, &exec_round, calls.clone());
+        if reviewable {
+            if let Some(view) = view {
+                self.store_pending_post_review(
+                    &s.actor_id,
+                    super::growth::PendingPostReview {
+                        pre_view: view,
+                        executed_calls: calls,
+                        revision: check_stamp.revision,
+                        seen_cursor: check_stamp.seen_cursor,
+                        sim_minutes: world.minutes(),
+                        chat: false,
+                    },
+                );
+            }
+        }
         let status = if outcome.outdated {
             RequestStatus::Outdated
         } else {
@@ -289,6 +391,101 @@ impl ResidentRuntime {
                 json!({"accepted":accepted,"calls":outcome.names}),
             )
             .request(round.id),
+        );
+    }
+
+    /// 行动后评估：只写角色卡与候选记忆，不执行世界动作。
+    fn settle_post_review(
+        &mut self,
+        world: &mut World,
+        s: &mut Session,
+        round: &RepliedRound,
+        reply: Result<ModelReply, ModelError>,
+    ) {
+        let Some(pending) = self.take_pending_post_review(&s.actor_id) else {
+            self.ledger_close(round.id, RequestStatus::Failed, "缺少待评估的动作");
+            return;
+        };
+        let current = if pending.chat {
+            world.actor(&s.actor_id).is_some_and(|a| {
+                a.actions.agent_controlled
+                    && !a.needs.incapacitated()
+                    && !event_arrived(a, pending.seen_cursor, None)
+            })
+        } else {
+            still_current(world, &s.actor_id, &pending_review_stamp(&pending))
+        };
+        if !current {
+            self.ledger_close(round.id, RequestStatus::Outdated, "世界变化，跳过事后评估");
+            return;
+        }
+        let reply = reply.and_then(|reply| {
+            reply.validate()?;
+            Ok(reply)
+        });
+        let arguments = single_growth_call(&reply, crate::growth::POST_TOOL);
+        let parsed = arguments
+            .as_ref()
+            .and_then(|v| serde_json::to_string(v).ok())
+            .and_then(|text| crate::growth::PostActionReviewReply::parse(&text).ok())
+            .filter(|p| p.validate().is_ok());
+        let Some(parsed) = parsed else {
+            self.ledger_close(round.id, RequestStatus::Failed, "事后评估结果无效");
+            return;
+        };
+        let at = world.minutes();
+        s.push_outcome(parsed.outcome_view(at));
+        if parsed.memory_candidate.importance >= 0.3
+            && !parsed.memory_candidate.text.trim().is_empty()
+        {
+            s.push_memory_candidate(crate::session::MemoryCandidate {
+                at,
+                text: parsed.memory_candidate.text.clone(),
+                importance: parsed.memory_candidate.importance,
+                tags: parsed.memory_candidate.tags.clone(),
+            });
+        }
+        self.ledger_close(round.id, RequestStatus::Adopted, "行动后评估已记录");
+        self.record(
+            world,
+            s,
+            Trace::new(
+                "post_review",
+                json!({"summary": parsed.outcome_record.summary}),
+            )
+            .request(round.id),
+        );
+    }
+
+    /// 人格校准：只微调 Session 里的人格倾向参数。
+    fn settle_calibration(
+        &mut self,
+        world: &mut World,
+        s: &mut Session,
+        round: &RepliedRound,
+        reply: Result<ModelReply, ModelError>,
+    ) {
+        let reply = reply.and_then(|reply| {
+            reply.validate()?;
+            Ok(reply)
+        });
+        let arguments = single_growth_call(&reply, crate::growth::CALIBRATION_TOOL);
+        let parsed = arguments
+            .as_ref()
+            .and_then(|v| serde_json::to_string(v).ok())
+            .and_then(|text| crate::growth::CalibrationReply::parse(&text).ok())
+            .filter(|p| p.validate().is_ok());
+        let Some(parsed) = parsed else {
+            self.ledger_close(round.id, RequestStatus::Failed, "校准结果无效");
+            return;
+        };
+        apply_calibration(&mut s.personality, &parsed.calibration_record.adjustments);
+        s.push_calibration(parsed.view(world.minutes()));
+        self.ledger_close(round.id, RequestStatus::Adopted, "人格校准已应用");
+        self.record(
+            world,
+            s,
+            Trace::new("calibration", json!({"personality": s.personality})).request(round.id),
         );
     }
 
@@ -365,13 +562,23 @@ impl ResidentRuntime {
         let format_retry = match round.kind {
             RequestKind::Life => s.is_format_retry(&reply),
             RequestKind::Chat => s.chat.attempts > 0,
-            RequestKind::Reflection | RequestKind::ActionReflection => false,
+            RequestKind::Reflection
+            | RequestKind::ActionReflection
+            | RequestKind::PostActionReview
+            | RequestKind::Calibration => false,
         };
         if round.kind == RequestKind::Life
             && !format_retry
-            && self.begin_action_reflection(world, s, &round.stamp, round.id, &reply)
+            && self.begin_action_reflection(world, s, &round.stamp, round.id, &reply, false)
         {
             self.ledger_close(round.id, RequestStatus::Adopted, "草案进入行动前自省");
+            return;
+        }
+        if round.kind == RequestKind::Chat
+            && !format_retry
+            && self.begin_action_reflection(world, s, &round.stamp, round.id, &reply, true)
+        {
+            self.ledger_close(round.id, RequestStatus::Adopted, "发言进入行动前自省");
             return;
         }
         let assistant = Message {
@@ -394,7 +601,9 @@ impl ResidentRuntime {
                     s.remember_known_prefix(prefix);
                 }
             }
-            RequestKind::ActionReflection => {}
+            RequestKind::ActionReflection
+            | RequestKind::PostActionReview
+            | RequestKind::Calibration => {}
         }
         if !format_retry {
             note_thought(world, &s.actor_id, round.kind, &reply);
@@ -419,7 +628,10 @@ impl ResidentRuntime {
         match round.kind {
             RequestKind::Life => self.finish_life_round(world, s, round, outcome.outdated),
             RequestKind::Chat => self.finish_chat_round(world, s, round, outcome.outdated),
-            RequestKind::Reflection | RequestKind::ActionReflection => {}
+            RequestKind::Reflection
+            | RequestKind::ActionReflection
+            | RequestKind::PostActionReview
+            | RequestKind::Calibration => {}
         }
     }
 
@@ -643,11 +855,71 @@ impl ResidentRuntime {
             s,
             Trace::new("reflection_deferred", data).request(round.id),
         );
+        if s.needs_calibration {
+            s.needs_calibration = false;
+            self.begin_calibration(world, s);
+        }
     }
 }
 
 /// 执行前退回的调用：本轮次不开放的工具，以及收到重要通知后改变世界的调用。
 /// 未知工具名不在这里处理，交给执行入口报错。
+fn pending_review_stamp(pending: &super::growth::PendingPostReview) -> RequestStamp {
+    RequestStamp {
+        id: 0,
+        epoch: 0,
+        revision: pending.revision,
+        seen_cursor: pending.seen_cursor,
+        sim_minutes: pending.sim_minutes,
+        reserved_tokens: 0,
+        day: 0,
+        sent_bytes: 0,
+        prefix_digest: 0,
+        kind: RequestKind::PostActionReview,
+    }
+}
+
+fn last_chat_tool_result(s: &Session) -> Value {
+    s.chat
+        .messages
+        .iter()
+        .rev()
+        .find(|message| message.role == Role::Tool)
+        .and_then(|message| serde_json::from_str::<Value>(&message.content).ok())
+        .unwrap_or(Value::Null)
+}
+
+fn single_growth_call(reply: &Result<ModelReply, ModelError>, tool: &str) -> Option<Value> {
+    let reply = reply.as_ref().ok()?;
+    let mut calls = reply.calls.iter().filter(|c| c.name == tool);
+    let call = calls.next()?;
+    if calls.next().is_some() {
+        return None;
+    }
+    Some(call.arguments.clone())
+}
+
+fn apply_calibration(
+    personality: &mut protocol::PersonalityView,
+    adjustments: &[crate::growth::Adjustment],
+) {
+    for adjustment in adjustments {
+        let delta = adjustment.delta.clamp(-0.1, 0.1);
+        let target = match adjustment.dimension {
+            crate::growth::CalibrationDimension::Caution => &mut personality.caution,
+            crate::growth::CalibrationDimension::TrustBaseline => &mut personality.trust_baseline,
+            crate::growth::CalibrationDimension::Exploration => &mut personality.exploration,
+            crate::growth::CalibrationDimension::SocialInitiative => {
+                &mut personality.social_initiative
+            }
+            crate::growth::CalibrationDimension::ReflectionConfidence => {
+                &mut personality.reflection_confidence
+            }
+        };
+        *target = (*target + delta).clamp(0.0, 1.0);
+    }
+}
+
 /// 自省期间没有换人、失去控制或收到重要通知；地点/道具的普通变化仍由执行时校验。
 fn still_current(world: &World, actor: &str, stamp: &RequestStamp) -> bool {
     world.actor(actor).is_some_and(|a| {
@@ -664,7 +936,9 @@ fn screen(kind: RequestKind, name: Option<ToolName>, important_new: bool) -> Opt
             RequestKind::Reflection => prompts::REFLECTION_TOOLS_ONLY,
             RequestKind::Chat => prompts::CHAT_TOOLS_ONLY,
             RequestKind::Life => prompts::LIFE_TOOLS_ONLY,
-            RequestKind::ActionReflection => prompts::LIFE_TOOLS_ONLY,
+            RequestKind::ActionReflection
+            | RequestKind::PostActionReview
+            | RequestKind::Calibration => prompts::LIFE_TOOLS_ONLY,
         };
         return Some(ToolError::new(ToolErrorKind::NotAllowed, rule));
     }

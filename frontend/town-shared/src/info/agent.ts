@@ -14,6 +14,9 @@ type Goal = ResidentDetailView['goals'][number]
 type Result = ResidentDetailView['results'][number]
 type Interaction = ResidentDetailView['interactions'][number]
 type Memory = ResidentDetailView['memories'][number]
+type Outcome = NonNullable<ResidentDetailView['outcome_records']>[number]
+type Consolidation = NonNullable<ResidentDetailView['consolidation_records']>[number]
+type Calibration = NonNullable<ResidentDetailView['calibration_records']>[number]
 
 const resultStatusLabels = {
   succeeded: '完成',
@@ -24,6 +27,47 @@ const resultStatusLabels = {
 
 const alignmentLabels = { high: '高', medium: '中', low: '低' }
 const riskLabels = { none: '无', low: '低', medium: '中', high: '高' }
+const accuracyLabels = {
+  accurate: '预判准确',
+  optimistic: '预判乐观',
+  pessimistic: '预判悲观',
+  unknown: '未知',
+}
+const progressLabels = {
+  advanced: '推进了目标',
+  stalled: '原地踏步',
+  regressed: '倒退了',
+  unknown: '未知',
+}
+
+function outcomeRow(o: Outcome): HTMLElement {
+  const row = text('article', '', 'agent-outcome')
+  row.append(
+    text('strong', `${o.clock} · ${accuracyLabels[o.prediction_accuracy]}`),
+    text('p', `「${playerText(o.summary)}」`),
+    text('p', `${progressLabels[o.goal_progress]} · ${playerText(o.goal_note)}`, 'dim')
+  )
+  for (const effect of o.unexpected_effects)
+    row.append(text('p', `意外：${playerText(effect)}`, 'dim'))
+  if (o.lesson) row.append(text('p', `学到：${playerText(o.lesson)}`, 'dim'))
+  return row
+}
+
+function consolidationRow(c: Consolidation): HTMLElement {
+  const row = text('article', '', 'agent-consolidation')
+  row.append(text('strong', c.clock), text('p', `「${playerText(c.period_summary)}」`))
+  for (const lesson of c.lessons) row.append(text('p', `经验：${playerText(lesson.text)}`, 'dim'))
+  for (const rel of c.relationship_updates)
+    row.append(text('p', `${playerText(rel.target)}：${playerText(rel.judgment)}`, 'dim'))
+  return row
+}
+
+function calibrationRow(c: Calibration): HTMLElement {
+  const row = text('article', '', 'agent-calibration')
+  row.append(text('strong', c.clock), text('p', `「${playerText(c.summary)}」`))
+  if (c.personality_note) row.append(text('p', playerText(c.personality_note), 'dim'))
+  return row
+}
 
 function reflectionSection(r: ActionReflectionView): HTMLElement[] {
   const rows = [
@@ -170,7 +214,23 @@ export function createAgentView(box: HTMLElement, recorded = false) {
     )
     const fragment = document.createDocumentFragment()
     if (view.reflection) fragment.append(...reflectionSection(view.reflection))
+    if (view.personality) {
+      const p = view.personality
+      fragment.append(
+        text('h4', '人格倾向'),
+        text(
+          'p',
+          `谨慎 ${p.caution.toFixed(2)} · 信任 ${p.trust_baseline.toFixed(2)} · 探索 ${p.exploration.toFixed(2)} · 社交 ${p.social_initiative.toFixed(2)} · 反思 ${p.reflection_confidence.toFixed(2)}`,
+          'dim'
+        )
+      )
+    }
+    if (view.self_model?.identity_note)
+      fragment.append(text('h4', '自我认识'), text('p', playerText(view.self_model.identity_note)))
     fragment.append(
+      ...section('最近回顾', view.outcome_records ?? [], '还没有行动回顾', outcomeRow),
+      ...section('最近整理', view.consolidation_records ?? [], '还没有周期整理', consolidationRow),
+      ...section('最近校准', view.calibration_records ?? [], '还没有人格校准', calibrationRow),
       ...section('持续目标', view.goals, '还没有记录目标', goalRow),
       ...section('最近动作结果', view.results, '还没有动作结果', resultRow)
     )

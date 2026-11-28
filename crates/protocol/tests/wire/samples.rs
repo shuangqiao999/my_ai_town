@@ -102,6 +102,8 @@ fn detail_view() -> ResidentDetailView {
             text: "图书馆今天开放".into(),
             at: 425.0,
             replaces: vec![],
+            tags: vec![],
+            importance: 0.0,
             events: vec![WorldFact {
                 event_id: 3,
                 at: 425.0,
@@ -118,6 +120,12 @@ fn detail_view() -> ResidentDetailView {
             }],
         }],
         reflection: None,
+        outcome_records: vec![],
+        consolidation_records: vec![],
+        calibration_records: vec![],
+        personality: None,
+        self_model: None,
+        pending_goal_adjustment: None,
     }
 }
 
